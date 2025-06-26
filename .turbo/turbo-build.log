@@ -1,0 +1,93 @@
+[34mnext-commerce:build[0m: cache hit, replaying output [2m18f879438c9475cf[0m
+[34mnext-commerce:build: [0m
+[34mnext-commerce:build: [0m> next-commerce@0.0.1 build C:\Users\Heitor\commerce-1\site
+[34mnext-commerce:build: [0m> next build
+[34mnext-commerce:build: [0m
+[34mnext-commerce:build: [0mnext.config.js {
+[34mnext-commerce:build: [0m  "commerce": {
+[34mnext-commerce:build: [0m    "provider": "local",
+[34mnext-commerce:build: [0m    "features": {
+[34mnext-commerce:build: [0m      "cart": false,
+[34mnext-commerce:build: [0m      "search": false,
+[34mnext-commerce:build: [0m      "wishlist": false,
+[34mnext-commerce:build: [0m      "customerAuth": false,
+[34mnext-commerce:build: [0m      "customCheckout": false
+[34mnext-commerce:build: [0m    }
+[34mnext-commerce:build: [0m  },
+[34mnext-commerce:build: [0m  "i18n": {
+[34mnext-commerce:build: [0m    "locales": [
+[34mnext-commerce:build: [0m      "en-US",
+[34mnext-commerce:build: [0m      "es"
+[34mnext-commerce:build: [0m    ],
+[34mnext-commerce:build: [0m    "defaultLocale": "en-US"
+[34mnext-commerce:build: [0m  },
+[34mnext-commerce:build: [0m  "experimental": {
+[34mnext-commerce:build: [0m    "esmExternals": "loose"
+[34mnext-commerce:build: [0m  },
+[34mnext-commerce:build: [0m  "images": {
+[34mnext-commerce:build: [0m    "domains": [
+[34mnext-commerce:build: [0m      "localhost"
+[34mnext-commerce:build: [0m    ]
+[34mnext-commerce:build: [0m  },
+[34mnext-commerce:build: [0m  "env": {}
+[34mnext-commerce:build: [0m}
+[34mnext-commerce:build: [0mwarn  - Invalid next.config.js options detected: 
+[34mnext-commerce:build: [0m  - The root value has an unexpected property, commerce, which is not in the list of allowed properties (amp, analyticsId, assetPrefix, basePath, cleanDistDir, compiler, compress, crossOrigin, devIndicators, distDir, env, eslint, excludeDefaultMomentLocales, experimental, exportPathMap, generateBuildId, generateEtags, headers, httpAgentOptions, i18n, images, onDemandEntries, optimizeFonts, output, outputFileTracing, pageExtensions, poweredByHeader, productionBrowserSourceMaps, publicRuntimeConfig, reactStrictMode, redirects, rewrites, sassOptions, serverRuntimeConfig, staticPageGenerationTimeout, swcMinify, trailingSlash, typescript, useFileSystemPublicRoutes, webpack).
+[34mnext-commerce:build: [0m
+[34mnext-commerce:build: [0mSee more info here: https://nextjs.org/docs/messages/invalid-next-config
+[34mnext-commerce:build: [0mwarn  - You have enabled experimental feature (esmExternals) in next.config.js.
+[34mnext-commerce:build: [0mwarn  - Experimental features are not covered by semver, and may cause unexpected or broken application behavior. Use at your own risk.
+[34mnext-commerce:build: [0m
+[34mnext-commerce:build: [0minfo  - Linting and checking validity of types...
+[34mnext-commerce:build: [0minfo  - Creating an optimized production build...
+[34mnext-commerce:build: [0mBrowserslist: caniuse-lite is outdated. Please run:
+[34mnext-commerce:build: [0m  npx browserslist@latest --update-db
+[34mnext-commerce:build: [0m  Why you should do it regularly: https://github.com/browserslist/browserslist#browsers-data-updating
+[34mnext-commerce:build: [0mBrowserslist: caniuse-lite is outdated. Please run:
+[34mnext-commerce:build: [0m  npx update-browserslist-db@latest
+[34mnext-commerce:build: [0m  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+[34mnext-commerce:build: [0minfo  - Compiled successfully
+[34mnext-commerce:build: [0minfo  - Collecting page data...
+[34mnext-commerce:build: [0minfo  - Generating static pages (0/23)
+[34mnext-commerce:build: [0minfo  - Generating static pages (5/23)
+[34mnext-commerce:build: [0minfo  - Generating static pages (11/23)
+[34mnext-commerce:build: [0minfo  - Generating static pages (17/23)
+[34mnext-commerce:build: [0minfo  - Generating static pages (23/23)
+[34mnext-commerce:build: [0minfo  - Finalizing page optimization...
+[34mnext-commerce:build: [0m
+[34mnext-commerce:build: [0mRoute (pages)                                           Size     First Load JS
+[34mnext-commerce:build: [0m┌ ● /                                                   4.34 kB         135 kB
+[34mnext-commerce:build: [0m├   └ css/5a9582be90d29784.css                          2.11 kB
+[34mnext-commerce:build: [0m├   /_app                                               0 B            79.4 kB
+[34mnext-commerce:build: [0m├ ● /[...pages]                                         432 B           131 kB
+[34mnext-commerce:build: [0m├ ○ /404                                                447 B           131 kB
+[34mnext-commerce:build: [0m├ λ /api/commerce/[[...commerce]]                       0 B            79.4 kB
+[34mnext-commerce:build: [0m├ ● /cart                                               1.58 kB         132 kB
+[34mnext-commerce:build: [0m├ ● /orders                                             598 B           131 kB
+[34mnext-commerce:build: [0m├ ● /product/[slug] (ISR: 200 Seconds) (2910 ms)        29.3 kB         160 kB
+[34mnext-commerce:build: [0m├   └ css/568b3aecc4fbd30e.css                          3 kB
+[34mnext-commerce:build: [0m├   ├ /en-US/product/lightweight-jacket (673 ms)
+[34mnext-commerce:build: [0m├   ├ /en-US/product/shirt (650 ms)
+[34mnext-commerce:build: [0m├   ├ /en-US/product/new-short-sleeve-t-shirt (539 ms)
+[34mnext-commerce:build: [0m├   ├ /es/product/lightweight-jacket (354 ms)
+[34mnext-commerce:build: [0m├   ├ /es/product/shirt (349 ms)
+[34mnext-commerce:build: [0m├   └ /es/product/new-short-sleeve-t-shirt (345 ms)
+[34mnext-commerce:build: [0m├ ● /profile                                            544 B           131 kB
+[34mnext-commerce:build: [0m├ ● /search                                             253 B           135 kB
+[34mnext-commerce:build: [0m├ ● /search/[category]                                  262 B           135 kB
+[34mnext-commerce:build: [0m├ ● /search/designers/[name]                            265 B           135 kB
+[34mnext-commerce:build: [0m├ ● /search/designers/[name]/[category]                 276 B           135 kB
+[34mnext-commerce:build: [0m└ ● /wishlist                                           2.36 kB         133 kB
+[34mnext-commerce:build: [0m    └ css/aeb3e3fe3a05774d.css                          836 B
+[34mnext-commerce:build: [0m+ First Load JS shared by all                           84.7 kB
+[34mnext-commerce:build: [0m  ├ chunks/framework-23bb51c2d15fac13.js                45.4 kB
+[34mnext-commerce:build: [0m  ├ chunks/main-26564da65dde50ce.js                     27.4 kB
+[34mnext-commerce:build: [0m  ├ chunks/pages/_app-d65c3cb955f28cf3.js               4.25 kB
+[34mnext-commerce:build: [0m  ├ chunks/webpack-36415bc8c6f11b4b.js                  2.33 kB
+[34mnext-commerce:build: [0m  └ css/471ab6cc02a8f617.css                            5.33 kB
+[34mnext-commerce:build: [0m
+[34mnext-commerce:build: [0mλ  (Server)  server-side renders at runtime (uses getInitialProps or getServerSideProps)
+[34mnext-commerce:build: [0m○  (Static)  automatically rendered as static HTML (uses no initial props)
+[34mnext-commerce:build: [0m●  (SSG)     automatically generated as static HTML + JSON (uses getStaticProps)
+[34mnext-commerce:build: [0m   (ISR)     incremental static regeneration (uses revalidate in getStaticProps)
+[34mnext-commerce:build: [0m
