@@ -1,13 +1,44 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import { X, ChevronDown, ChevronUp } from 'lucide-react'
-import Image from 'next/image'
+import { Canvas, useFrame, useLoader } from '@react-three/fiber'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader'
+import { OrbitControls, Environment } from '@react-three/drei'
+import * as THREE from 'three'
+
+// 3D Model Component
+function TinyHouseModel({ rotation }: { rotation: number }) {
+  const gltf = useLoader(GLTFLoader, '/tiny_home/Tiny_House.glb')
+  const meshRef = useRef<THREE.Group>(null)
+
+  useFrame(() => {
+    if (meshRef.current) {
+      // Apply scroll-based rotation
+      meshRef.current.rotation.y = rotation
+    }
+  })
+
+  return (
+    <group ref={meshRef} scale={[2, 2, 2]} position={[0, -1, 0]}>
+      <primitive object={gltf.scene} />
+    </group>
+  )
+}
+
+// Loading component
+function ModelLoader() {
+  return (
+    <div className="flex items-center justify-center h-full">
+      <div className="text-white/80 text-lg">Loading 3D Model...</div>
+    </div>
+  )
+}
 
 export default function MenuHome() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [scrollProgress, setScrollProgress] = useState(0)
   const [notificationShown, setNotificationShown] = useState(false)
   const [showNotification, setShowNotification] = useState(false)
-  const [heroScale, setHeroScale] = useState(1)
+  const [modelRotation, setModelRotation] = useState(0)
   const [heroOpacity, setHeroOpacity] = useState(1)
   const [titleOpacity, setTitleOpacity] = useState(1)
 
@@ -36,38 +67,37 @@ export default function MenuHome() {
 
       setScrollProgress(Math.round(scrollPercent))
 
-      // Calculate hero scaling and opacity based on scroll percentage (not viewport height)
-      // Hero should completely disappear by 10% scroll progress
-      const heroFadeThreshold = 10 // Hero disappears by 10% scroll
+      // Calculate 3D model rotation based on scroll (0 to 90 degrees over first 25% scroll)
+      const maxRotationScroll = 25 // Complete rotation over first 25% of scroll
+      const rotationProgress = Math.min(scrollPercent / maxRotationScroll, 1)
+      const newRotation = rotationProgress * (Math.PI / 2) // 90 degrees in radians
+      setModelRotation(newRotation)
 
-      // Hero scaling: from 1 to 0 as user scrolls from 0% to 10%
-      let newScale, newHeroOpacity
-      if (scrollPercent <= heroFadeThreshold) {
-        const fadeRatio = scrollPercent / heroFadeThreshold
-        newScale = Math.max(1 - fadeRatio * 1, 0.1) // Scale from 1 to 0.1
-        newHeroOpacity = Math.max(1 - fadeRatio * 1, 0) // Fade from 1 to 0
+      // Calculate rotation in degrees for sidebar trigger
+      const rotationDegrees = (newRotation * 180) / Math.PI
+
+      // Hero opacity: fade out gradually as model rotates
+      let newHeroOpacity
+      if (rotationDegrees < 60) {
+        // Fade out over first 60 degrees of rotation
+        newHeroOpacity = Math.max(1 - (rotationDegrees / 60) * 0.8, 0.2)
       } else {
-        // Completely hidden after 10% scroll
-        newScale = 0
+        // Completely hidden after 60 degrees
         newHeroOpacity = 0
       }
-
-      setHeroScale(newScale)
       setHeroOpacity(newHeroOpacity)
 
-      // Title opacity: disappear even faster than hero (by 8% scroll)
-      const titleFadeThreshold = 8
+      // Title opacity: disappear faster than hero (by 30 degrees rotation)
       let newTitleOpacity
-      if (scrollPercent <= titleFadeThreshold) {
-        const titleFadeRatio = scrollPercent / titleFadeThreshold
-        newTitleOpacity = Math.max(1 - titleFadeRatio * 1, 0)
+      if (rotationDegrees < 30) {
+        newTitleOpacity = Math.max(1 - rotationDegrees / 30, 0)
       } else {
         newTitleOpacity = 0
       }
       setTitleOpacity(newTitleOpacity)
 
-      // Auto-open/close sidebar based on scroll position
-      if (scrollPercent >= 10 && !sidebarOpen) {
+      // Auto-open/close sidebar based on rotation (30 degrees)
+      if (rotationDegrees >= 30 && !sidebarOpen) {
         setSidebarOpen(true)
 
         // Show notification on first auto-open
@@ -78,7 +108,7 @@ export default function MenuHome() {
           }, 3000)
           setNotificationShown(true)
         }
-      } else if (scrollPercent < 10 && sidebarOpen) {
+      } else if (rotationDegrees < 30 && sidebarOpen) {
         setSidebarOpen(false)
         // Close all dropdowns when sidebar closes
         setDropdownStates({
@@ -149,6 +179,9 @@ export default function MenuHome() {
     }))
   }
 
+  // Calculate rotation in degrees for display
+  const rotationDegrees = Math.round((modelRotation * 180) / Math.PI)
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900">
       {/* Progress Bar */}
@@ -166,18 +199,17 @@ export default function MenuHome() {
         }`}
       >
         {sidebarOpen
-          ? `Sidebar Open (${scrollProgress}%)`
-          : `Scroll Progress: ${scrollProgress}%`}
+          ? `Sidebar Open (${rotationDegrees}°)`
+          : `Model Rotation: ${rotationDegrees}°`}
       </div>
 
-      {/* Dynamic Hero Section - Only render if opacity > 0 */}
+      {/* Dynamic Hero Section with 3D Model - Only render if opacity > 0 */}
       {heroOpacity > 0 && (
         <div
           className="fixed top-0 left-0 w-full h-screen flex items-center justify-center z-5 pointer-events-none"
           style={{
-            transform: `scale(${heroScale})`,
             opacity: heroOpacity,
-            transition: 'transform 0.1s ease-out, opacity 0.2s ease-out',
+            transition: 'opacity 0.2s ease-out',
           }}
         >
           <div className="relative w-full max-w-6xl mx-auto px-8">
@@ -198,24 +230,42 @@ export default function MenuHome() {
               <div className="mt-6 w-32 h-1 bg-gradient-to-r from-cyan-400 to-purple-400 mx-auto rounded-full"></div>
             </div>
 
-            {/* Hero Image Container */}
-            <div className="relative w-full max-w-4xl mx-auto">
-              <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-8 shadow-2xl shadow-purple-500/20 overflow-hidden">
-                {/* Gradient overlay for the image container */}
+            {/* 3D Model Container */}
+            <div className="relative w-full max-w-4xl mx-auto h-96">
+              <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-8 shadow-2xl shadow-purple-500/20 overflow-hidden h-full">
+                {/* Gradient overlay for the container */}
                 <div className="absolute inset-0 bg-gradient-to-br from-white/20 via-transparent to-purple-500/10 pointer-events-none rounded-3xl" />
 
-                <div className="relative z-10 rounded-2xl overflow-hidden shadow-xl">
-                  <Image
-                    src="/tiny.png"
-                    width={1000}
-                    height={1000}
-                    alt="Picture of a home"
-                    className="w-full h-auto object-cover"
-                    priority
-                  />
+                {/* Three.js Canvas */}
+                <div className="relative z-10 rounded-2xl overflow-hidden shadow-xl h-full">
+                  <Canvas
+                    camera={{ position: [0, 2, 5], fov: 50 }}
+                    style={{ background: 'transparent' }}
+                  >
+                    <Suspense fallback={null}>
+                      {/* Lighting */}
+                      <ambientLight intensity={0.6} />
+                      <directionalLight position={[10, 10, 5]} intensity={1} />
+                      <pointLight position={[-10, -10, -10]} intensity={0.5} />
+
+                      {/* Environment for better lighting */}
+                      <Environment preset="sunset" />
+
+                      {/* 3D Model */}
+                      <TinyHouseModel rotation={modelRotation} />
+
+                      {/* Controls (disabled for scroll-based rotation) */}
+                      <OrbitControls
+                        enabled={false}
+                        enableZoom={false}
+                        enablePan={false}
+                        enableRotate={false}
+                      />
+                    </Suspense>
+                  </Canvas>
                 </div>
 
-                {/* Floating elements around the image */}
+                {/* Floating elements around the 3D container */}
                 <div className="absolute top-8 right-8 w-4 h-4 bg-cyan-400/40 rounded-full animate-pulse"></div>
                 <div
                   className="absolute bottom-8 left-8 w-3 h-3 bg-purple-400/40 rounded-full animate-ping"
@@ -230,112 +280,6 @@ export default function MenuHome() {
           </div>
         </div>
       )}
-
-      {/* Main Content - Starts below the hero */}
-      <main
-        className={`relative z-10 transition-transform duration-700 ease-in-out ${
-          sidebarOpen ? '-translate-x-80' : 'translate-x-0'
-        }`}
-        style={{ marginTop: '100vh' }} // Push content below the hero
-      >
-        <div className="max-w-4xl mx-auto px-12 py-12 text-white">
-          <div className="space-y-8">
-            <h2 className="text-4xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
-              Tiny Homes Smart Navigation
-            </h2>
-
-            <p className="text-xl leading-relaxed text-gray-100">
-              Explore your tiny home with our glassmorphism sidebar featuring
-              beautiful dropdown menus for each room. Each dropdown contains
-              four carefully organized smart home items with smooth animations
-              and transparent glassmorphism styling that maintains the modern
-              aesthetic.
-            </p>
-
-            <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-8 shadow-xl">
-              <h3 className="text-2xl font-semibold mb-4 text-cyan-300">
-                Smart Home Features:
-              </h3>
-              <ul className="space-y-3 text-gray-200">
-                <li className="flex items-center space-x-3">
-                  <div className="w-2 h-2 bg-cyan-400 rounded-full"></div>
-                  <span>
-                    <strong>Room-Based Navigation:</strong> Organized by Living
-                    Room, Kitchen, Bedroom, and Bathroom
-                  </span>
-                </li>
-                <li className="flex items-center space-x-3">
-                  <div className="w-2 h-2 bg-purple-400 rounded-full"></div>
-                  <span>
-                    <strong>Smart Device Control:</strong> Access TVs, lights,
-                    appliances, and more
-                  </span>
-                </li>
-                <li className="flex items-center space-x-3">
-                  <div className="w-2 h-2 bg-pink-400 rounded-full"></div>
-                  <span>
-                    <strong>Fast Access:</strong> Hero disappears at 10% scroll
-                    for immediate navigation
-                  </span>
-                </li>
-                <li className="flex items-center space-x-3">
-                  <div className="w-2 h-2 bg-emerald-400 rounded-full"></div>
-                  <span>
-                    <strong>Glassmorphism Design:</strong> Beautiful transparent
-                    interface with backdrop blur
-                  </span>
-                </li>
-              </ul>
-            </div>
-
-            <div className="grid md:grid-cols-2 gap-6">
-              {Object.entries(menuData).map(([room, items]) => (
-                <div
-                  key={room}
-                  className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-6 shadow-xl"
-                >
-                  <h4 className="text-xl font-semibold mb-3 text-cyan-300">
-                    {room.replace('_', ' ')}
-                  </h4>
-                  <ul className="space-y-2">
-                    {items.map((item) => (
-                      <li
-                        key={item}
-                        className="flex items-center space-x-2 text-gray-200"
-                      >
-                        <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full"></div>
-                        <span className="text-sm">{item}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-
-            {/* Add more content to make scrolling meaningful */}
-            <div className="space-y-6">
-              {[1, 2, 3, 4, 5].map((section) => (
-                <div
-                  key={section}
-                  className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-6 shadow-xl"
-                >
-                  <h4 className="text-xl font-semibold mb-3 text-cyan-300">
-                    Smart Home Section {section}
-                  </h4>
-                  <p className="text-gray-200 leading-relaxed">
-                    Experience the future of tiny home living with our
-                    integrated smart home system. Control lighting, temperature,
-                    entertainment, and security from a single, beautiful
-                    interface. Each room is carefully designed to maximize space
-                    while providing all the modern conveniences you need for
-                    comfortable living.
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </main>
 
       {/* Glassmorphism Sidebar with Dropdown Menus */}
       <div
@@ -353,6 +297,20 @@ export default function MenuHome() {
         >
           <X size={20} />
         </button>
+
+        {/* Notification */}
+        <div
+          className={`absolute top-20 left-1/2 transform -translate-x-1/2 bg-white/20 backdrop-blur-md text-white px-5 py-3 rounded-2xl text-sm text-center transition-all duration-500 border border-white/30 shadow-lg shadow-emerald-500/25 z-10 ${
+            showNotification
+              ? 'opacity-100 translate-y-0'
+              : 'opacity-0 -translate-y-2'
+          }`}
+        >
+          <div className="flex items-center space-x-2">
+            <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
+            <span>3D Navigation opened at 30° rotation</span>
+          </div>
+        </div>
 
         {/* Navigation Menu with Dropdowns */}
         <nav className="mt-36 text-center relative z-10 px-4">

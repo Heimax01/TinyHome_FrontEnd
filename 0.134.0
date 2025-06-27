@@ -1,0 +1,24 @@
+..                                       | Progress: resolved 0, reused 1, downloaded 0, added 0
+..                                       | Progress: resolved 292, reused 227, downloaded 0, added 0
+..                                       | Progress: resolved 986, reused 509, downloaded 0, added 0
+..                                       |   +2   -2 +-
+
+dependencies:
+- @react-three/drei 10.3.0
++ @react-three/drei 10.3.0
++ @types/three 0.177.0
+
+ WARN  Issues with peer dependencies found
+site
+├─┬ @react-three/drei
+│ ├── ✕ unmet peer react@^19: found 18.2.0
+│ └── ✕ unmet peer react-dom@^19: found 18.2.0
+└─┬ @react-three/fiber
+  ├── ✕ unmet peer react@^19.0.0: found 18.2.0
+  ├── ✕ unmet peer react-dom@^19.0.0: found 18.2.0
+  ├─┬ its-fine
+  │ └── ✕ unmet peer react@^19.0.0: found 18.2.0
+  └─┬ react-reconciler
+    └── ✕ unmet peer react@^19.0.0: found 18.2.0
+
+..                                       | Progress: resolved 986, reused 509, downloaded 0, added 2, done
