@@ -1,49 +1,56 @@
-import { useState, useEffect, useRef, Suspense } from 'react'
+import React, { useState, useEffect, useRef, Suspense } from 'react'
 import { X, ChevronDown, ChevronUp } from 'lucide-react'
-import { Canvas, useFrame, useLoader } from '@react-three/fiber'
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader'
-import { OrbitControls, Environment } from '@react-three/drei'
-import * as THREE from 'three'
+import { Canvas, useFrame } from '@react-three/fiber'
+import { useGLTF, OrbitControls, Environment } from '@react-three/drei'
+import type { Group } from 'three'
 
-// 3D Model Component
-function TinyHouseModel({ rotation }: { rotation: number }) {
-  const gltf = useLoader(GLTFLoader, '/tiny_home/Tiny_House.glb')
-  const meshRef = useRef<THREE.Group>(null)
+// 3D Model Component with smooth interpolated rotation
+function TinyHouseModel({
+  targetRotation,
+  scale,
+}: {
+  targetRotation: number
+  scale: number
+}) {
+  const { scene } = useGLTF('/tiny_home/Tiny_House.glb')
+  const meshRef = useRef<Group>(null)
+  const currentRotation = useRef<number>(0)
 
   useFrame(() => {
     if (meshRef.current) {
-      // Apply scroll-based rotation
-      meshRef.current.rotation.y = rotation
+      // Smooth interpolation for rotation (lerp)
+      const lerpFactor = 0.1 // Adjust for smoothness (0.05 = very smooth, 0.2 = more responsive)
+      currentRotation.current +=
+        (targetRotation - currentRotation.current) * lerpFactor
+      meshRef.current.rotation.y = currentRotation.current
     }
   })
 
   return (
-    <group ref={meshRef} scale={[2, 2, 2]} position={[0, -1, 0]}>
-      <primitive object={gltf.scene} />
+    <group ref={meshRef} scale={[scale, scale, scale]} position={[0, -1.2, 0]}>
+      <primitive object={scene} />
     </group>
   )
 }
 
-// Loading component
-function ModelLoader() {
-  return (
-    <div className="flex items-center justify-center h-full">
-      <div className="text-white/80 text-lg">Loading 3D Model...</div>
-    </div>
-  )
-}
+// Preload the model for better performance
+useGLTF.preload('/tiny_home/Tiny_House.glb')
 
-export default function MenuHome() {
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [scrollProgress, setScrollProgress] = useState(0)
-  const [notificationShown, setNotificationShown] = useState(false)
-  const [showNotification, setShowNotification] = useState(false)
-  const [modelRotation, setModelRotation] = useState(0)
-  const [heroOpacity, setHeroOpacity] = useState(1)
-  const [titleOpacity, setTitleOpacity] = useState(1)
+export default function MenuHome(): JSX.Element {
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(false)
+  const [notificationShown, setNotificationShown] = useState<boolean>(false)
+  const [showNotification, setShowNotification] = useState<boolean>(false)
+  const [targetRotation, setTargetRotation] = useState<number>(0)
+  const [titleOpacity, setTitleOpacity] = useState<number>(1)
+  const [modelScale, setModelScale] = useState<number>(1.5)
 
   // Dropdown states for each menu item
-  const [dropdownStates, setDropdownStates] = useState({
+  const [dropdownStates, setDropdownStates] = useState<{
+    Living_Room: boolean
+    Kitchen: boolean
+    Bedroom: boolean
+    Bathroom: boolean
+  }>({
     Living_Room: false,
     Kitchen: false,
     Bedroom: false,
@@ -51,7 +58,12 @@ export default function MenuHome() {
   })
 
   // Dropdown menu data
-  const menuData = {
+  const menuData: {
+    Living_Room: string[]
+    Kitchen: string[]
+    Bedroom: string[]
+    Bathroom: string[]
+  } = {
     Living_Room: ['Samsung TV', 'LED lights', 'Videogame', 'Carpet'],
     Kitchen: ['Oven', 'Microwave', 'Mixer', 'Cooktop'],
     Bedroom: ['Bed', 'Rug', 'Desk', 'Chair'],
@@ -59,36 +71,34 @@ export default function MenuHome() {
   }
 
   useEffect(() => {
-    const handleScroll = () => {
-      const scrollTop = window.pageYOffset
-      const docHeight = document.documentElement.scrollHeight
-      const winHeight = window.innerHeight
-      const scrollPercent = (scrollTop / (docHeight - winHeight)) * 100
+    let accumulatedRotation = 0
+    let isScrolling = false
+    let scrollTimeout: NodeJS.Timeout
 
-      setScrollProgress(Math.round(scrollPercent))
+    const handleWheel = (e: WheelEvent): void => {
+      // Prevent default scrolling behavior
+      e.preventDefault()
 
-      // Calculate 3D model rotation based on scroll (0 to 90 degrees over first 25% scroll)
-      const maxRotationScroll = 25 // Complete rotation over first 25% of scroll
-      const rotationProgress = Math.min(scrollPercent / maxRotationScroll, 1)
-      const newRotation = rotationProgress * (Math.PI / 2) // 90 degrees in radians
-      setModelRotation(newRotation)
+      // Improved rotation sensitivity for smoother control
+      const rotationSensitivity = 0.005 // Reduced for finer control
+      accumulatedRotation += e.deltaY * rotationSensitivity
 
-      // Calculate rotation in degrees for sidebar trigger
-      const rotationDegrees = (newRotation * 180) / Math.PI
+      // Set target rotation for smooth interpolation
+      setTargetRotation(accumulatedRotation)
 
-      // Hero opacity: fade out gradually as model rotates
-      let newHeroOpacity
-      if (rotationDegrees < 60) {
-        // Fade out over first 60 degrees of rotation
-        newHeroOpacity = Math.max(1 - (rotationDegrees / 60) * 0.8, 0.2)
-      } else {
-        // Completely hidden after 60 degrees
-        newHeroOpacity = 0
-      }
-      setHeroOpacity(newHeroOpacity)
+      // Calculate rotation in degrees for progressive stages
+      const rotationDegrees =
+        Math.abs((accumulatedRotation * 180) / Math.PI) % 360
 
-      // Title opacity: disappear faster than hero (by 30 degrees rotation)
-      let newTitleOpacity
+      // Smooth scrolling indicator
+      isScrolling = true
+      clearTimeout(scrollTimeout)
+      scrollTimeout = setTimeout(() => {
+        isScrolling = false
+      }, 150)
+
+      // STAGE 1: Title Fade (0° - 30°)
+      let newTitleOpacity: number
       if (rotationDegrees < 30) {
         newTitleOpacity = Math.max(1 - rotationDegrees / 30, 0)
       } else {
@@ -96,8 +106,23 @@ export default function MenuHome() {
       }
       setTitleOpacity(newTitleOpacity)
 
-      // Auto-open/close sidebar based on rotation (30 degrees)
-      if (rotationDegrees >= 30 && !sidebarOpen) {
+      // STAGE 2: Model Scaling (30° - 60°)
+      let newModelScale: number
+      if (rotationDegrees < 30) {
+        // Stage 1: Normal size
+        newModelScale = 1.5
+      } else if (rotationDegrees < 60) {
+        // Stage 2: Growing bigger (1.5 to 2.8 for better visibility in full width)
+        const scaleProgress = (rotationDegrees - 30) / 30 // 0 to 1
+        newModelScale = 1.5 + scaleProgress * 1.3 // 1.5 to 2.8
+      } else {
+        // Stage 3: Maximum size
+        newModelScale = 2.8
+      }
+      setModelScale(newModelScale)
+
+      // STAGE 3: Sidebar Appearance (60°+)
+      if (rotationDegrees >= 60 && !sidebarOpen) {
         setSidebarOpen(true)
 
         // Show notification on first auto-open
@@ -108,43 +133,21 @@ export default function MenuHome() {
           }, 3000)
           setNotificationShown(true)
         }
-      } else if (rotationDegrees < 30 && sidebarOpen) {
-        setSidebarOpen(false)
-        // Close all dropdowns when sidebar closes
-        setDropdownStates({
-          Living_Room: false,
-          Kitchen: false,
-          Bedroom: false,
-          Bathroom: false,
-        })
       }
     }
 
-    // Throttled scroll event for better performance
-    let scrollTimeout: NodeJS.Timeout
-    const throttledHandleScroll = () => {
-      if (scrollTimeout) {
-        clearTimeout(scrollTimeout)
-      }
-      scrollTimeout = setTimeout(handleScroll, 10)
-    }
-
-    window.addEventListener('scroll', throttledHandleScroll)
-
-    // Initial scroll check
-    handleScroll()
+    // Add wheel event listener with improved handling
+    window.addEventListener('wheel', handleWheel, { passive: false })
 
     return () => {
-      window.removeEventListener('scroll', throttledHandleScroll)
-      if (scrollTimeout) {
-        clearTimeout(scrollTimeout)
-      }
+      window.removeEventListener('wheel', handleWheel)
+      clearTimeout(scrollTimeout)
     }
   }, [sidebarOpen, notificationShown])
 
   // Handle ESC key to close sidebar
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Escape' && sidebarOpen) {
         setSidebarOpen(false)
         // Close all dropdowns when sidebar closes
@@ -161,7 +164,7 @@ export default function MenuHome() {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [sidebarOpen])
 
-  const closeSidebar = () => {
+  const closeSidebar = (): void => {
     setSidebarOpen(false)
     // Close all dropdowns when sidebar closes
     setDropdownStates({
@@ -172,7 +175,7 @@ export default function MenuHome() {
     })
   }
 
-  const toggleDropdown = (item: string) => {
+  const toggleDropdown = (item: string): void => {
     setDropdownStates((prev) => ({
       ...prev,
       [item]: !prev[item as keyof typeof prev],
@@ -180,106 +183,229 @@ export default function MenuHome() {
   }
 
   // Calculate rotation in degrees for display
-  const rotationDegrees = Math.round((modelRotation * 180) / Math.PI)
+  const rotationDegrees = Math.round(
+    Math.abs((targetRotation * 180) / Math.PI) % 360
+  )
+
+  // Determine current stage for display
+  const getCurrentStage = (): string => {
+    if (rotationDegrees < 30) return 'Stage 1: Title Visible'
+    if (rotationDegrees < 60) return 'Stage 2: Model Growing'
+    return 'Stage 3: Navigation Active'
+  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900">
-      {/* Progress Bar */}
-      <div
-        className="fixed top-0 left-0 h-1 bg-gradient-to-r from-cyan-400 to-purple-400 z-50 transition-all duration-100 ease-out"
-        style={{ width: `${scrollProgress}%` }}
-      />
-
-      {/* Scroll Indicator */}
+    <div className="h-screen overflow-hidden bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900">
+      {/* Progress Indicator */}
       <div
         className={`fixed top-5 left-5 px-4 py-2 rounded-xl text-white text-sm z-50 transition-all duration-300 backdrop-blur-md border border-white/20 ${
-          sidebarOpen
+          rotationDegrees >= 60
             ? 'bg-emerald-500/30 shadow-lg shadow-emerald-500/25'
+            : rotationDegrees >= 30
+            ? 'bg-orange-500/30 shadow-lg shadow-orange-500/25'
             : 'bg-white/10 shadow-lg shadow-black/25'
         }`}
       >
-        {sidebarOpen
-          ? `Sidebar Open (${rotationDegrees}°)`
-          : `Model Rotation: ${rotationDegrees}°`}
+        <div className="flex flex-col items-center space-y-1">
+          <span className="font-medium">{getCurrentStage()}</span>
+          <span className="text-xs opacity-80">
+            {rotationDegrees}° • Scale: {modelScale.toFixed(1)}x
+          </span>
+        </div>
       </div>
 
-      {/* Dynamic Hero Section with 3D Model - Only render if opacity > 0 */}
-      {heroOpacity > 0 && (
+      {/* Stage Progress Bar */}
+      <div className="fixed top-5 right-5 w-48 h-2 bg-white/10 rounded-full backdrop-blur-md z-50">
         <div
-          className="fixed top-0 left-0 w-full h-screen flex items-center justify-center z-5 pointer-events-none"
+          className="h-full rounded-full transition-all duration-300 bg-gradient-to-r from-cyan-400 via-orange-400 to-emerald-400"
           style={{
-            opacity: heroOpacity,
-            transition: 'opacity 0.2s ease-out',
+            width: `${Math.min((rotationDegrees / 60) * 100, 100)}%`,
           }}
-        >
-          <div className="relative w-full max-w-6xl mx-auto px-8">
-            {/* Hero Title */}
-            <div
-              className="text-center mb-6"
-              style={{
-                opacity: titleOpacity,
-                transition: 'opacity 0.1s ease-out',
-              }}
-            >
-              <h1 className="text-7xl md:text-8xl lg:text-6xl font-bold bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-400 bg-clip-text text-transparent mt-12 leading-tight">
-                Tiny Homes
-              </h1>
-              <h2 className="text-2xl md:text-2xl lg:text-2xl font-light text-white/90 tracking-wide mt-3">
-                Custom made
-              </h2>
-              <div className="mt-6 w-32 h-1 bg-gradient-to-r from-cyan-400 to-purple-400 mx-auto rounded-full"></div>
-            </div>
+        />
+        <div className="flex justify-between mt-1 text-xs text-white/60">
+          <span>0°</span>
+          <span>30°</span>
+          <span>60°</span>
+        </div>
+      </div>
 
-            {/* 3D Model Container */}
-            <div className="relative w-full max-w-4xl mx-auto h-96">
-              <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-8 shadow-2xl shadow-purple-500/20 overflow-hidden h-full">
-                {/* Gradient overlay for the container */}
-                <div className="absolute inset-0 bg-gradient-to-br from-white/20 via-transparent to-purple-500/10 pointer-events-none rounded-3xl" />
+      {/* Persistent Hero Section with 3D Model - Full Width */}
+      <div className="fixed top-0 left-0 w-full h-screen flex items-center justify-center z-5 pointer-events-none">
+        <div className="relative w-full h-full px-4">
+          {/* Hero Title - Progressive Fade */}
+          <div
+            className="absolute top-0 left-0 w-full text-center z-10"
+            style={{
+              opacity: titleOpacity,
+              transform: `translateY(${(1 - titleOpacity) * -20}px)`,
+              transition: 'opacity 0.3s ease-out, transform 0.3s ease-out',
+              paddingTop: '8rem',
+            }}
+          >
+            <h1 className="text-6xl md:text-7xl lg:text-8xl font-bold bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-400 bg-clip-text text-transparent leading-tight">
+              Tiny Homes
+            </h1>
+            <h2 className="text-xl md:text-2xl lg:text-3xl font-light text-white/90 tracking-wide mt-3">
+              Custom made
+            </h2>
+            <div className="mt-6 w-32 h-1 bg-gradient-to-r from-cyan-400 to-purple-400 mx-auto rounded-full"></div>
 
-                {/* Three.js Canvas */}
-                <div className="relative z-10 rounded-2xl overflow-hidden shadow-xl h-full">
-                  <Canvas
-                    camera={{ position: [0, 2, 5], fov: 50 }}
-                    style={{ background: 'transparent' }}
-                  >
-                    <Suspense fallback={null}>
-                      {/* Lighting */}
-                      <ambientLight intensity={0.6} />
-                      <directionalLight position={[10, 10, 5]} intensity={1} />
-                      <pointLight position={[-10, -10, -10]} intensity={0.5} />
-
-                      {/* Environment for better lighting */}
-                      <Environment preset="sunset" />
-
-                      {/* 3D Model */}
-                      <TinyHouseModel rotation={modelRotation} />
-
-                      {/* Controls (disabled for scroll-based rotation) */}
-                      <OrbitControls
-                        enabled={false}
-                        enableZoom={false}
-                        enablePan={false}
-                        enableRotate={false}
-                      />
-                    </Suspense>
-                  </Canvas>
-                </div>
-
-                {/* Floating elements around the 3D container */}
-                <div className="absolute top-8 right-8 w-4 h-4 bg-cyan-400/40 rounded-full animate-pulse"></div>
-                <div
-                  className="absolute bottom-8 left-8 w-3 h-3 bg-purple-400/40 rounded-full animate-ping"
-                  style={{ animationDelay: '1s' }}
-                ></div>
-                <div
-                  className="absolute top-1/3 left-8 w-2 h-2 bg-pink-400/40 rounded-full animate-pulse"
-                  style={{ animationDelay: '2s' }}
-                ></div>
-              </div>
+            {/* Stage 1 Instructions */}
+            <div className="mt-8">
+              <p className="text-white/70 text-lg">
+                Scroll to begin the experience
+              </p>
+              <p className="text-white/50 text-sm mt-2">
+                Watch the title fade → model grow → navigation appear
+              </p>
             </div>
           </div>
+
+          {/* 3D Model Container - Full Width */}
+          <div className="relative w-full h-full flex items-center justify-center transition-all duration-700 ease-out">
+            {/* Three.js Canvas - Full Width and Height */}
+            <Canvas
+              camera={{
+                position: [0, 3, 8 - (modelScale - 1.5) * 1.5],
+                fov: 45 - (modelScale - 1.5) * 3,
+              }}
+              style={{
+                background: 'transparent',
+                width: '100%',
+                height: '100%',
+              }}
+            >
+              <Suspense fallback={null}>
+                {/* Enhanced Lighting that adapts to model scale */}
+                <ambientLight intensity={0.6 + (modelScale - 1.5) * 0.1} />
+                <directionalLight
+                  position={[15, 15, 8]}
+                  intensity={1.4 + (modelScale - 1.5) * 0.2}
+                  castShadow
+                />
+                <directionalLight
+                  position={[-15, 8, -8]}
+                  intensity={1.0 + (modelScale - 1.5) * 0.1}
+                />
+                <pointLight
+                  position={[0, 12, 0]}
+                  intensity={0.8 + (modelScale - 1.5) * 0.1}
+                />
+                <pointLight
+                  position={[8, -8, 8]}
+                  intensity={0.5}
+                  color="#00ffff"
+                />
+                <pointLight
+                  position={[-8, -8, -8]}
+                  intensity={0.4}
+                  color="#ff00ff"
+                />
+
+                {/* Environment for better lighting */}
+                <Environment preset="sunset" />
+
+                {/* 3D Model - Smooth Rotation with Dynamic Scaling */}
+                <TinyHouseModel
+                  targetRotation={targetRotation}
+                  scale={modelScale}
+                />
+
+                {/* Controls (disabled for wheel-based rotation) */}
+                <OrbitControls
+                  enabled={false}
+                  enableZoom={false}
+                  enablePan={false}
+                  enableRotate={false}
+                />
+              </Suspense>
+            </Canvas>
+
+            {/* Floating elements around the 3D model - Full width positioning */}
+            <div
+              className="absolute top-16 right-16 bg-cyan-400/40 rounded-full animate-pulse transition-all duration-500"
+              style={{
+                width: `${14 + (modelScale - 1.5) * 6}px`,
+                height: `${14 + (modelScale - 1.5) * 6}px`,
+              }}
+            ></div>
+            <div
+              className="absolute bottom-16 left-16 bg-purple-400/40 rounded-full animate-ping transition-all duration-500"
+              style={{
+                width: `${12 + (modelScale - 1.5) * 5}px`,
+                height: `${12 + (modelScale - 1.5) * 5}px`,
+                animationDelay: '1s',
+              }}
+            ></div>
+            <div
+              className="absolute top-1/3 left-16 bg-pink-400/40 rounded-full animate-pulse transition-all duration-500"
+              style={{
+                width: `${10 + (modelScale - 1.5) * 4}px`,
+                height: `${10 + (modelScale - 1.5) * 4}px`,
+                animationDelay: '2s',
+              }}
+            ></div>
+            <div
+              className="absolute bottom-1/3 right-20 bg-emerald-400/40 rounded-full animate-pulse transition-all duration-500"
+              style={{
+                width: `${10 + (modelScale - 1.5) * 4}px`,
+                height: `${10 + (modelScale - 1.5) * 4}px`,
+                animationDelay: '3s',
+              }}
+            ></div>
+            <div
+              className="absolute top-1/4 right-1/4 bg-yellow-400/30 rounded-full animate-pulse transition-all duration-500"
+              style={{
+                width: `${8 + (modelScale - 1.5) * 3}px`,
+                height: `${8 + (modelScale - 1.5) * 3}px`,
+                animationDelay: '4s',
+              }}
+            ></div>
+            <div
+              className="absolute bottom-1/4 left-1/4 bg-indigo-400/30 rounded-full animate-pulse transition-all duration-500"
+              style={{
+                width: `${8 + (modelScale - 1.5) * 3}px`,
+                height: `${8 + (modelScale - 1.5) * 3}px`,
+                animationDelay: '5s',
+              }}
+            ></div>
+          </div>
+
+          {/* Stage-based Instructions - Bottom positioned */}
+          <div className="absolute bottom-16 left-0 w-full text-center z-10">
+            {rotationDegrees < 30 && (
+              <div className="transition-opacity duration-500">
+                <p className="text-white/70 text-lg">
+                  Continue scrolling to see the model grow
+                </p>
+                <p className="text-white/50 text-sm mt-2">
+                  Stage 1 of 3: Title will fade away
+                </p>
+              </div>
+            )}
+            {rotationDegrees >= 30 && rotationDegrees < 60 && (
+              <div className="transition-opacity duration-500">
+                <p className="text-white/70 text-lg">
+                  Model is growing bigger! Keep scrolling
+                </p>
+                <p className="text-white/50 text-sm mt-2">
+                  Stage 2 of 3: Model scaling up in full width
+                </p>
+              </div>
+            )}
+            {rotationDegrees >= 60 && (
+              <div className="transition-opacity duration-500">
+                <p className="text-white/70 text-lg">
+                  Full-width navigation active! Smooth rotation enabled
+                </p>
+                <p className="text-white/50 text-sm mt-2">
+                  Stage 3 of 3: Complete experience unlocked
+                </p>
+              </div>
+            )}
+          </div>
         </div>
-      )}
+      </div>
 
       {/* Glassmorphism Sidebar with Dropdown Menus */}
       <div
@@ -308,7 +434,7 @@ export default function MenuHome() {
         >
           <div className="flex items-center space-x-2">
             <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
-            <span>3D Navigation opened at 30° rotation</span>
+            <span>Full-Width Experience • Smooth Rotation Active</span>
           </div>
         </div>
 

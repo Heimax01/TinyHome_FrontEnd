@@ -45,12 +45,6 @@ export default function Home({
     <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900">
       <MenuHome />
 
-      <Marquee variant="secondary">
-        {products.slice(0, 3).map((product: any, i: number) => (
-          <ProductCard key={product.id} product={product} variant="slim" />
-        ))}
-      </Marquee>
-
       <Marquee>
         {products.slice(3).map((product: any, i: number) => (
           <ProductCard key={product.id} product={product} variant="slim" />
