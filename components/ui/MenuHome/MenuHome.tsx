@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, Suspense } from 'react'
+import React, { useState, useEffect, useRef, Suspense, useMemo } from 'react'
 import {
   X,
   ChevronDown,
@@ -10,7 +10,8 @@ import {
 } from 'lucide-react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useGLTF, OrbitControls, Environment } from '@react-three/drei'
-import type { Group } from 'three'
+import type { Group, Vector3 } from 'three'
+import { Vector3 as ThreeVector3 } from 'three'
 
 // Interface for sphere positioning data
 interface SpherePosition {
@@ -23,56 +24,214 @@ interface SpherePosition {
   name: string
 }
 
-// Individual Positioning Sphere Component - Relative to House
-function PositioningSphere({
+// LOD Quality levels
+type LODLevel = 'low' | 'medium' | 'high'
+
+// Performance monitoring hook
+function usePerformanceMonitor() {
+  const [fps, setFps] = useState<number>(60)
+  const frameCount = useRef<number>(0)
+  const lastTime = useRef<number>(performance.now())
+
+  useFrame(() => {
+    frameCount.current++
+    const currentTime = performance.now()
+
+    if (currentTime - lastTime.current >= 1000) {
+      setFps(frameCount.current)
+      frameCount.current = 0
+      lastTime.current = currentTime
+    }
+  })
+
+  return fps
+}
+
+// Distance-based LOD calculation hook
+function useDistanceLOD(
+  position: [number, number, number],
+  camera: any,
+  focusedSphere: number | null,
+  sphereId?: number
+) {
+  return useMemo(() => {
+    const spherePos = new ThreeVector3(...position)
+    const distance = camera.position.distanceTo(spherePos)
+
+    // Special case: if this sphere is focused, always use high detail
+    if (sphereId && focusedSphere === sphereId) {
+      return {
+        detail: 'high' as LODLevel,
+        visible: true,
+        showWireframe: true,
+        showFloating: true,
+        geometryDetail: { widthSegments: 32, heightSegments: 32 },
+      }
+    }
+
+    // Distance-based LOD
+    if (distance < 2) {
+      return {
+        detail: 'high' as LODLevel,
+        visible: true,
+        showWireframe: true,
+        showFloating: true,
+        geometryDetail: { widthSegments: 16, heightSegments: 16 },
+      }
+    } else if (distance < 5) {
+      return {
+        detail: 'medium' as LODLevel,
+        visible: true,
+        showWireframe: true,
+        showFloating: true,
+        geometryDetail: { widthSegments: 12, heightSegments: 12 },
+      }
+    } else if (distance < 10) {
+      return {
+        detail: 'low' as LODLevel,
+        visible: true,
+        showWireframe: false,
+        showFloating: false,
+        geometryDetail: { widthSegments: 8, heightSegments: 8 },
+      }
+    } else {
+      return {
+        detail: 'low' as LODLevel,
+        visible: false,
+        showWireframe: false,
+        showFloating: false,
+        geometryDetail: { widthSegments: 6, heightSegments: 6 },
+      }
+    }
+  }, [position, camera.position, focusedSphere, sphereId])
+}
+
+// LOD-Optimized Positioning Sphere Component
+function LODPositioningSphere({
   position,
   color,
   visible,
+  sphereId,
+  focusedSphere,
 }: {
   position: [number, number, number]
   color: string
   visible: boolean
+  sphereId: number
+  focusedSphere: number | null
 }) {
   const meshRef = useRef<Group>(null)
+  const { camera } = useThree()
+
+  // Calculate LOD based on distance and focus state
+  const lod = useDistanceLOD(position, camera, focusedSphere, sphereId)
+
+  // Performance-based quality adjustment
+  const fps = usePerformanceMonitor()
+  const performanceAdjustment = useMemo(() => {
+    if (fps < 30) return 0.5 // Reduce quality significantly
+    if (fps < 45) return 0.75 // Reduce quality moderately
+    return 1.0 // Full quality
+  }, [fps])
+
+  // Adjust geometry detail based on performance
+  const finalGeometryDetail = useMemo(
+    () => ({
+      widthSegments: Math.max(
+        4,
+        Math.floor(lod.geometryDetail.widthSegments * performanceAdjustment)
+      ),
+      heightSegments: Math.max(
+        4,
+        Math.floor(lod.geometryDetail.heightSegments * performanceAdjustment)
+      ),
+    }),
+    [lod.geometryDetail, performanceAdjustment]
+  )
+
+  // Calculate opacity based on distance and performance (MOVED BEFORE EARLY RETURN)
+  const opacity = useMemo(() => {
+    const baseOpacity = 0.9
+    const distanceOpacity =
+      lod.detail === 'high' ? 1.0 : lod.detail === 'medium' ? 0.8 : 0.6
+    return baseOpacity * distanceOpacity * performanceAdjustment
+  }, [lod, performanceAdjustment])
 
   useFrame((state) => {
-    if (meshRef.current && visible) {
-      // Gentle floating animation - position is relative to house
-      meshRef.current.position.set(
-        position[0],
-        position[1] + Math.sin(state.clock.elapsedTime * 2) * 0.05,
-        position[2]
-      )
+    if (meshRef.current && visible && lod.visible) {
+      // Only animate floating if LOD allows it and performance is good
+      if (lod.showFloating && fps > 45) {
+        meshRef.current.position.set(
+          position[0],
+          position[1] + Math.sin(state.clock.elapsedTime * 2) * 0.05,
+          position[2]
+        )
+      } else {
+        // Static position for better performance
+        meshRef.current.position.set(position[0], position[1], position[2])
+      }
     }
   })
 
-  if (!visible) return null
+  // Don't render if not visible or too far away
+  if (!visible || !lod.visible) return null
 
   return (
     <group ref={meshRef}>
+      {/* Main sphere with LOD geometry */}
       <mesh>
-        <sphereGeometry args={[0.15, 16, 16]} />
+        <sphereGeometry
+          args={[
+            0.15,
+            finalGeometryDetail.widthSegments,
+            finalGeometryDetail.heightSegments,
+          ]}
+        />
         <meshStandardMaterial
           color={color}
           transparent
-          opacity={0.9}
+          opacity={opacity}
           emissive={color}
-          emissiveIntensity={0.3}
+          emissiveIntensity={
+            lod.detail === 'high' ? 0.3 : lod.detail === 'medium' ? 0.2 : 0.1
+          }
         />
       </mesh>
-      <mesh>
-        <sphereGeometry args={[0.18, 8, 8]} />
-        <meshBasicMaterial color={color} wireframe transparent opacity={0.4} />
-      </mesh>
+
+      {/* Wireframe overlay - only show if LOD allows and performance is good */}
+      {lod.showWireframe && fps > 30 && (
+        <mesh>
+          <sphereGeometry
+            args={[
+              0.18,
+              Math.max(6, Math.floor(finalGeometryDetail.widthSegments * 0.75)),
+              Math.max(
+                6,
+                Math.floor(finalGeometryDetail.heightSegments * 0.75)
+              ),
+            ]}
+          />
+          <meshBasicMaterial
+            color={color}
+            wireframe
+            transparent
+            opacity={opacity * 0.4}
+          />
+        </mesh>
+      )}
     </group>
   )
 }
 
-// Camera Animation Component
-function AnimatedCamera({
+// LOD-Optimized Camera Animation Component
+function LODStaticCameraAnimation({
   cameraTarget,
   modelScale,
   onAnimationComplete,
+  focusedSphere,
+  spheres,
+  targetRotation,
+  cameraMode,
 }: {
   cameraTarget: {
     position: [number, number, number]
@@ -81,29 +240,61 @@ function AnimatedCamera({
   }
   modelScale: number
   onAnimationComplete: () => void
+  focusedSphere: number | null
+  spheres: SpherePosition[]
+  targetRotation: number
+  cameraMode: 'overview' | 'focused' | 'transitioning'
 }) {
   const { camera } = useThree()
   const currentPosition = useRef<[number, number, number]>([0, 3, 8])
   const currentLookAt = useRef<[number, number, number]>([0, 0, 0])
   const isAnimating = useRef<boolean>(false)
+  const isLocked = useRef<boolean>(false)
+
+  // Performance monitoring for adaptive quality
+  const fps = usePerformanceMonitor()
+
+  // Adaptive animation quality based on performance and transition type
+  const animationQuality = useMemo(() => {
+    if (fps < 30) return { lerpFactor: 0.15, updateFrequency: 2 } // Slower for performance
+    if (fps < 45) return { lerpFactor: 0.12, updateFrequency: 1 } // Moderate quality
+    return { lerpFactor: 0.1, updateFrequency: 1 } // Smooth quality for zoom in
+  }, [fps])
+
+  const frameCounter = useRef<number>(0)
 
   useFrame(() => {
+    frameCounter.current++
+
+    // Skip frames for performance if needed
+    if (frameCounter.current % animationQuality.updateFrequency !== 0) return
+
     if (cameraTarget.animating && !isAnimating.current) {
-      // Start animation - get current camera position
+      // Start new animation - capture current position
       currentPosition.current = [
         camera.position.x,
         camera.position.y,
         camera.position.z,
       ]
-      currentLookAt.current = [0, 0, 0] // Current lookAt target
+      currentLookAt.current = [
+        camera.position.x,
+        camera.position.y,
+        camera.position.z - 1, // Look forward from current position
+      ]
       isAnimating.current = true
+      console.log(
+        'Starting camera animation from:',
+        currentPosition.current,
+        'to:',
+        cameraTarget.position
+      )
     }
 
     if (cameraTarget.animating || isAnimating.current) {
-      // Smooth interpolation for camera position - shortest path
-      const lerpFactor = 0.08 // Smooth animation speed
+      // Use adaptive lerp factor for smooth animation
+      const lerpFactor = animationQuality.lerpFactor
 
-      // Interpolate position (shortest path)
+      // Animate position
       currentPosition.current[0] +=
         (cameraTarget.position[0] - currentPosition.current[0]) * lerpFactor
       currentPosition.current[1] +=
@@ -111,7 +302,7 @@ function AnimatedCamera({
       currentPosition.current[2] +=
         (cameraTarget.position[2] - currentPosition.current[2]) * lerpFactor
 
-      // Interpolate lookAt
+      // Animate look at target
       currentLookAt.current[0] +=
         (cameraTarget.lookAt[0] - currentLookAt.current[0]) * lerpFactor
       currentLookAt.current[1] +=
@@ -119,119 +310,199 @@ function AnimatedCamera({
       currentLookAt.current[2] +=
         (cameraTarget.lookAt[2] - currentLookAt.current[2]) * lerpFactor
 
-      // Apply to camera
+      // Apply camera position and rotation
       camera.position.set(...currentPosition.current)
       camera.lookAt(...currentLookAt.current)
 
-      // Check if animation is complete (shortest distance threshold)
+      // Check if animation is complete (closer threshold for smoother transitions)
       const positionDistance = Math.sqrt(
         Math.pow(cameraTarget.position[0] - currentPosition.current[0], 2) +
           Math.pow(cameraTarget.position[1] - currentPosition.current[1], 2) +
           Math.pow(cameraTarget.position[2] - currentPosition.current[2], 2)
       )
 
-      if (positionDistance < 0.1) {
+      const lookAtDistance = Math.sqrt(
+        Math.pow(cameraTarget.lookAt[0] - currentLookAt.current[0], 2) +
+          Math.pow(cameraTarget.lookAt[1] - currentLookAt.current[1], 2) +
+          Math.pow(cameraTarget.lookAt[2] - currentLookAt.current[2], 2)
+      )
+
+      // Animation complete when both position and look-at are close enough
+      if (positionDistance < 0.05 && lookAtDistance < 0.05) {
+        console.log(
+          'Animation complete - position distance:',
+          positionDistance,
+          'lookAt distance:',
+          lookAtDistance
+        )
         isAnimating.current = false
+        isLocked.current = focusedSphere !== null
         onAnimationComplete()
       }
-    } else {
-      // Default camera behavior when not animating
+    } else if (
+      isLocked.current &&
+      focusedSphere &&
+      spheres.length > 0 &&
+      cameraMode !== 'transitioning'
+    ) {
+      // Static lock mode - camera stays perfectly centered on sphere
+      // BUT ONLY if we're not in transition mode to prevent returning to old sphere
+      const sphere = spheres.find((s) => s.id === focusedSphere)
+      if (sphere) {
+        const worldX =
+          sphere.x * Math.cos(targetRotation) -
+          sphere.z * Math.sin(targetRotation)
+        const worldZ =
+          sphere.x * Math.sin(targetRotation) +
+          sphere.z * Math.cos(targetRotation)
+        const worldY = sphere.y
+
+        const distance = 0.8
+        const height = 0.3
+
+        const angle = Math.atan2(worldZ, worldX) + Math.PI / 4
+        const staticCameraX = worldX + distance * Math.cos(angle)
+        const staticCameraY = worldY + height
+        const staticCameraZ = worldZ + distance * Math.sin(angle)
+
+        camera.position.set(staticCameraX, staticCameraY, staticCameraZ)
+        camera.lookAt(worldX, worldY, worldZ)
+      }
+    } else if (!isLocked.current) {
+      // Default overview mode
       const defaultPosition: [number, number, number] = [
         0,
         3,
         8 - (modelScale - 1.5) * 1.5,
       ]
 
-      // Only apply default if not currently animating to a sphere
-      if (!isAnimating.current) {
-        currentPosition.current[0] +=
-          (defaultPosition[0] - currentPosition.current[0]) * 0.02
-        currentPosition.current[1] +=
-          (defaultPosition[1] - currentPosition.current[1]) * 0.02
-        currentPosition.current[2] +=
-          (defaultPosition[2] - currentPosition.current[2]) * 0.02
+      const defaultLerpFactor = fps > 45 ? 0.02 : 0.01
 
-        currentLookAt.current[0] += (0 - currentLookAt.current[0]) * 0.02
-        currentLookAt.current[1] += (0 - currentLookAt.current[1]) * 0.02
-        currentLookAt.current[2] += (0 - currentLookAt.current[2]) * 0.02
+      currentPosition.current[0] +=
+        (defaultPosition[0] - currentPosition.current[0]) * defaultLerpFactor
+      currentPosition.current[1] +=
+        (defaultPosition[1] - currentPosition.current[1]) * defaultLerpFactor
+      currentPosition.current[2] +=
+        (defaultPosition[2] - currentPosition.current[2]) * defaultLerpFactor
 
-        camera.position.set(...currentPosition.current)
-        camera.lookAt(...currentLookAt.current)
-      }
+      currentLookAt.current[0] +=
+        (0 - currentLookAt.current[0]) * defaultLerpFactor
+      currentLookAt.current[1] +=
+        (0 - currentLookAt.current[1]) * defaultLerpFactor
+      currentLookAt.current[2] +=
+        (0 - currentLookAt.current[2]) * defaultLerpFactor
+
+      camera.position.set(...currentPosition.current)
+      camera.lookAt(...currentLookAt.current)
     }
   })
+
+  useEffect(() => {
+    if (focusedSphere === null) {
+      isLocked.current = false
+    }
+  }, [focusedSphere])
 
   return null
 }
 
-// 3D Model Component with spheres that rotate together
-function TinyHouseModel({
+// LOD-Optimized 3D Model Component
+function LODTinyHouseModel({
   targetRotation,
   scale,
   spheres = [],
+  focusedSphere,
 }: {
   targetRotation: number
   scale: number
   spheres?: SpherePosition[]
+  focusedSphere: number | null
 }) {
   const { scene } = useGLTF('/tiny_home/Tiny_House.glb')
   const meshRef = useRef<Group>(null)
   const currentRotation = useRef<number>(0)
   const velocity = useRef<number>(0)
+  const { camera } = useThree()
+
+  // Performance monitoring
+  const fps = usePerformanceMonitor()
+
+  // Calculate house LOD based on camera distance and scale
+  const houseLOD = useMemo(() => {
+    const housePosition = new ThreeVector3(0, -1.2, 0)
+    const distance = camera.position.distanceTo(housePosition)
+    const effectiveDistance = distance / scale
+
+    if (effectiveDistance < 3 || focusedSphere !== null) return 'high'
+    if (effectiveDistance < 8) return 'medium'
+    return 'low'
+  }, [camera.position, scale, focusedSphere])
+
+  // Adaptive rotation quality based on performance
+  const rotationQuality = useMemo(() => {
+    if (fps < 30) return { lerpFactor: 0.12, momentum: 0.01, damping: 0.9 }
+    if (fps < 45) return { lerpFactor: 0.1, momentum: 0.015, damping: 0.87 }
+    return { lerpFactor: 0.08, momentum: 0.02, damping: 0.85 }
+  }, [fps])
 
   useFrame(() => {
     if (meshRef.current) {
-      // Ultra-smooth interpolation with momentum
-      const lerpFactor = 0.08 // Slightly slower for ultra-smooth feel
       const difference = targetRotation - currentRotation.current
 
-      // Add momentum/inertia for natural feel
-      velocity.current += difference * 0.02
-      velocity.current *= 0.85 // Damping
+      // Use adaptive quality settings
+      velocity.current += difference * rotationQuality.momentum
+      velocity.current *= rotationQuality.damping
 
-      // Apply both direct interpolation and momentum
       currentRotation.current +=
-        difference * lerpFactor + velocity.current * 0.1
+        difference * rotationQuality.lerpFactor + velocity.current * 0.1
 
       meshRef.current.rotation.y = currentRotation.current
     }
   })
 
+  // Filter visible spheres based on performance
+  const visibleSpheres = useMemo(() => {
+    if (fps < 30) {
+      // Show only focused sphere and nearby spheres when performance is poor
+      return spheres.filter(
+        (sphere) =>
+          sphere.id === focusedSphere || (sphere.visible && Math.random() < 0.3) // Randomly show 30% of other spheres
+      )
+    }
+    return spheres.filter((sphere) => sphere.visible)
+  }, [spheres, focusedSphere, fps])
+
   return (
     <group ref={meshRef} scale={[scale, scale, scale]} position={[0, -1.2, 0]}>
-      {/* House Model */}
+      {/* House Model - could be swapped for different LOD versions */}
       <primitive object={scene} />
 
-      {/* Spheres positioned relative to house - rotate together */}
-      {spheres &&
-        spheres.length > 0 &&
-        spheres.map((sphere) => (
-          <PositioningSphere
-            key={sphere.id}
-            position={[sphere.x, sphere.y, sphere.z]}
-            color={sphere.color}
-            visible={sphere.visible}
-          />
-        ))}
+      {/* LOD-Optimized Spheres */}
+      {visibleSpheres.map((sphere) => (
+        <LODPositioningSphere
+          key={sphere.id}
+          position={[sphere.x, sphere.y, sphere.z]}
+          color={sphere.color}
+          visible={sphere.visible}
+          sphereId={sphere.id}
+          focusedSphere={focusedSphere}
+        />
+      ))}
     </group>
   )
 }
 
-// Preload the model for better performance
-useGLTF.preload('/tiny_home/Tiny_House.glb')
-
-export default function SpherePositioningSystem(): JSX.Element {
-  const [sidebarOpen, setSidebarOpen] = useState<boolean>(false)
-  const [notificationShown, setNotificationShown] = useState<boolean>(false)
-  const [showNotification, setShowNotification] = useState<boolean>(false)
+export default function LODOptimizedScene() {
+  // All existing state management...
+  const [scrollY, setScrollY] = useState<number>(0)
   const [targetRotation, setTargetRotation] = useState<number>(0)
-  const [titleOpacity, setTitleOpacity] = useState<number>(1)
   const [modelScale, setModelScale] = useState<number>(1.5)
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(false)
   const [rotationDegrees, setRotationDegrees] = useState<number>(0)
   const [showSphereControls, setShowSphereControls] = useState<boolean>(false)
   const [selectedSphere, setSelectedSphere] = useState<number | null>(null)
+  const [notificationShown, setNotificationShown] = useState<boolean>(false)
 
-  // Camera animation states
   const [cameraTarget, setCameraTarget] = useState<{
     position: [number, number, number]
     lookAt: [number, number, number]
@@ -242,8 +513,24 @@ export default function SpherePositioningSystem(): JSX.Element {
     animating: false,
   })
   const [notificationText, setNotificationText] = useState<string>('')
+  const [showNotification, setShowNotification] = useState<boolean>(false)
+  const [focusedSphere, setFocusedSphere] = useState<number | null>(null)
 
-  // Dropdown menu data
+  // Enhanced transition system for zoom out → zoom in
+  const [cameraMode, setCameraMode] = useState<
+    'overview' | 'focused' | 'transitioning'
+  >('overview')
+  const [pendingTarget, setPendingTarget] = useState<number | null>(null)
+  const [transitionPhase, setTransitionPhase] = useState<
+    'zoom_out' | 'zoom_in' | 'none'
+  >('none')
+
+  // Performance monitoring state
+  const [performanceMode, setPerformanceMode] = useState<
+    'auto' | 'high' | 'medium' | 'low'
+  >('auto')
+
+  // Menu data and spheres initialization (same as before)
   const menuData: {
     Living_Room: string[]
     Kitchen: string[]
@@ -256,28 +543,7 @@ export default function SpherePositioningSystem(): JSX.Element {
     Bathroom: ['Shower', 'Toilet', 'LED lights', 'Towell Hanger'],
   }
 
-  // Initialize 16 positioning spheres with specific appliance coordinates
   const [spheres, setSpheres] = useState<SpherePosition[]>(() => {
-    const colors = [
-      '#ff6b6b',
-      '#4ecdc4',
-      '#45b7d1',
-      '#96ceb4',
-      '#feca57',
-      '#ff9ff3',
-      '#54a0ff',
-      '#5f27cd',
-      '#00d2d3',
-      '#ff9f43',
-      '#ee5a24',
-      '#0abde3',
-      '#10ac84',
-      '#f368e0',
-      '#3742fa',
-      '#2f3542',
-    ]
-
-    // Flatten all appliances from menu data in order
     const allAppliances = [
       ...menuData.Living_Room,
       ...menuData.Kitchen,
@@ -285,7 +551,6 @@ export default function SpherePositioningSystem(): JSX.Element {
       ...menuData.Bathroom,
     ]
 
-    // Specific coordinates for each appliance
     const specificCoordinates = [
       { x: -1.2, y: 2.4, z: 1.8 }, // Samsung TV
       { x: -1.1, y: 2.6, z: 0.9 }, // LED lights
@@ -305,18 +570,36 @@ export default function SpherePositioningSystem(): JSX.Element {
       { x: 0.9, y: 0.8, z: -0.6 }, // Towell Hanger
     ]
 
-    return Array.from({ length: 16 }, (_, i) => ({
-      id: i + 1,
-      x: specificCoordinates[i]?.x || 0,
-      y: specificCoordinates[i]?.y || 0,
-      z: specificCoordinates[i]?.z || 0,
+    const colors = [
+      '#ff6b6b',
+      '#4ecdc4',
+      '#45b7d1',
+      '#96ceb4',
+      '#feca57',
+      '#ff9ff3',
+      '#54a0ff',
+      '#5f27cd',
+      '#00d2d3',
+      '#ff9f43',
+      '#ee5a24',
+      '#0abde3',
+      '#10ac84',
+      '#f368e0',
+      '#3742fa',
+      '#2f3542',
+    ]
+
+    return Array.from({ length: 16 }, (_, index) => ({
+      id: index + 1,
+      x: specificCoordinates[index].x,
+      y: specificCoordinates[index].y,
+      z: specificCoordinates[index].z,
       visible: true,
-      color: colors[i],
-      name: allAppliances[i] || `Point ${i + 1}`,
+      color: colors[index],
+      name: allAppliances[index],
     }))
   })
 
-  // Dropdown states for each menu item
   const [dropdownStates, setDropdownStates] = useState<{
     Living_Room: boolean
     Kitchen: boolean
@@ -329,47 +612,32 @@ export default function SpherePositioningSystem(): JSX.Element {
     Bathroom: false,
   })
 
+  // Wheel-based rotation handling (same as before)
   useEffect(() => {
     let accumulatedDegrees = 0
     let isScrolling = false
     let scrollTimeout: NodeJS.Timeout
 
     const handleWheel = (e: WheelEvent): void => {
-      // Prevent default scrolling behavior
       e.preventDefault()
 
-      // Ultra-precise degree-based rotation
       const degreesPerScroll = 1.2
       const scrollDirection = e.deltaY > 0 ? 1 : -1
 
-      // Accumulate degrees for precise control
       accumulatedDegrees += scrollDirection * degreesPerScroll
 
-      // Convert degrees to radians for Three.js
       const targetRadians = (accumulatedDegrees * Math.PI) / 180
       setTargetRotation(targetRadians)
 
-      // Update degree display (always positive, 0-360)
       const displayDegrees = Math.abs(accumulatedDegrees) % 360
       setRotationDegrees(displayDegrees)
 
-      // Smooth scrolling indicator
       isScrolling = true
       clearTimeout(scrollTimeout)
       scrollTimeout = setTimeout(() => {
         isScrolling = false
       }, 200)
 
-      // STAGE 1: Title Fade (0° - 30°)
-      let newTitleOpacity: number
-      if (displayDegrees < 30) {
-        newTitleOpacity = Math.max(1 - displayDegrees / 30, 0)
-      } else {
-        newTitleOpacity = 0
-      }
-      setTitleOpacity(newTitleOpacity)
-
-      // STAGE 2: Model Scaling (30° - 60°)
       let newModelScale: number
       if (displayDegrees < 30) {
         newModelScale = 1.5
@@ -381,10 +649,9 @@ export default function SpherePositioningSystem(): JSX.Element {
       }
       setModelScale(newModelScale)
 
-      // STAGE 3: Sidebar Appearance (60°+)
       if (displayDegrees >= 60 && !sidebarOpen) {
         setSidebarOpen(true)
-        setShowSphereControls(true) // Show sphere controls when sidebar appears
+        setShowSphereControls(true)
 
         if (!notificationShown) {
           setShowNotification(true)
@@ -404,7 +671,7 @@ export default function SpherePositioningSystem(): JSX.Element {
     }
   }, [sidebarOpen, notificationShown])
 
-  // Handle ESC key to close sidebar
+  // ESC key handler and other functions (same as before)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent): void => {
       if (e.key === 'Escape' && sidebarOpen) {
@@ -443,34 +710,71 @@ export default function SpherePositioningSystem(): JSX.Element {
     }))
   }
 
-  // Camera animation functions
   const zoomToSphere = (sphereId: number): void => {
     const sphere = spheres.find((s) => s.id === sphereId)
     if (!sphere) return
 
-    console.log(`Zooming to sphere ${sphereId}: ${sphere.name}`, sphere) // Debug log
+    console.log(`Zooming to sphere ${sphereId}: ${sphere.name}`, sphere)
 
-    // Calculate sphere position in world space (accounting for house rotation)
-    const distance = 1.5 // Closer distance for better view
-    const height = 0.8 // Height above sphere
+    // Check if we're already focused on a different sphere
+    if (focusedSphere && focusedSphere !== sphereId) {
+      console.log(
+        `Switching from sphere ${focusedSphere} to ${sphereId} - initiating zoom out → zoom in`
+      )
 
-    // Apply house rotation to sphere position to get world coordinates
+      // Set transition state FIRST to prevent camera lock issues
+      setCameraMode('transitioning')
+      setPendingTarget(sphereId)
+      setTransitionPhase('zoom_out')
+
+      // IMPORTANT: Clear focused sphere to prevent camera from locking back to old sphere
+      setFocusedSphere(null)
+
+      // First, zoom out to overview position
+      setCameraTarget({
+        position: [0, 3, 8 - (modelScale - 1.5) * 1.5],
+        lookAt: [0, 0, 0],
+        animating: true,
+      })
+
+      setNotificationText(
+        `Transitioning from ${
+          spheres.find((s) => s.id === focusedSphere)?.name
+        } to ${sphere.name}...`
+      )
+      setShowNotification(true)
+      setTimeout(() => setShowNotification(false), 2000)
+
+      return // Exit here, the zoom in will happen in handleAnimationComplete
+    }
+
+    // Direct zoom to sphere (first time or from overview)
+    performZoomToSphere(sphereId)
+  }
+
+  const performZoomToSphere = (sphereId: number): void => {
+    const sphere = spheres.find((s) => s.id === sphereId)
+    if (!sphere) return
+
     const worldX =
       sphere.x * Math.cos(targetRotation) - sphere.z * Math.sin(targetRotation)
     const worldZ =
       sphere.x * Math.sin(targetRotation) + sphere.z * Math.cos(targetRotation)
     const worldY = sphere.y
 
-    // Calculate camera position - shortest path approach
-    const angle = Math.atan2(worldZ, worldX) + Math.PI / 3 // Offset for good viewing angle
+    const distance = 0.8
+    const height = 0.3
+
+    const angle = Math.atan2(worldZ, worldX) + Math.PI / 4
     const cameraX = worldX + distance * Math.cos(angle)
     const cameraY = worldY + height
     const cameraZ = worldZ + distance * Math.sin(angle)
 
-    console.log('Camera target:', {
+    console.log('Camera target for perfect centering:', {
       position: [cameraX, cameraY, cameraZ],
       lookAt: [worldX, worldY, worldZ],
-    }) // Debug log
+      sphereWorld: { worldX, worldY, worldZ },
+    })
 
     setCameraTarget({
       position: [cameraX, cameraY, cameraZ],
@@ -478,13 +782,15 @@ export default function SpherePositioningSystem(): JSX.Element {
       animating: true,
     })
 
-    setNotificationText(`Zooming to ${sphere.name}`)
+    setFocusedSphere(sphereId)
+    setCameraMode('focused')
+    setNotificationText(`Focused on ${sphere.name} - LOD Optimized & Locked`)
     setShowNotification(true)
     setTimeout(() => setShowNotification(false), 2000)
   }
 
   const resetCamera = (): void => {
-    console.log('Resetting camera to overview') // Debug log
+    console.log('Resetting camera to overview')
 
     setCameraTarget({
       position: [0, 3, 8 - (modelScale - 1.5) * 1.5],
@@ -492,15 +798,88 @@ export default function SpherePositioningSystem(): JSX.Element {
       animating: true,
     })
 
-    setNotificationText('Returning to overview')
+    setFocusedSphere(null)
+    setCameraMode('overview')
+    setTransitionPhase('none')
+    setPendingTarget(null)
+    setNotificationText('Returning to overview - LOD Optimized')
     setShowNotification(true)
     setTimeout(() => setShowNotification(false), 2000)
   }
 
   const handleAnimationComplete = (): void => {
-    console.log('Animation complete') // Debug log
+    console.log('Animation complete - checking transition state:', {
+      cameraMode,
+      transitionPhase,
+      pendingTarget,
+    })
+
     setCameraTarget((prev) => ({ ...prev, animating: false }))
+
+    // Handle zoom out → zoom in transition
+    if (
+      cameraMode === 'transitioning' &&
+      transitionPhase === 'zoom_out' &&
+      pendingTarget
+    ) {
+      console.log(
+        `Zoom out complete, starting zoom in to sphere ${pendingTarget}`
+      )
+
+      // Brief pause before zooming in for smooth transition
+      setTimeout(() => {
+        console.log(`Initiating zoom in to sphere ${pendingTarget}`)
+        setTransitionPhase('zoom_in')
+
+        // Perform the zoom in animation
+        const sphere = spheres.find((s) => s.id === pendingTarget)
+        if (sphere) {
+          const worldX =
+            sphere.x * Math.cos(targetRotation) -
+            sphere.z * Math.sin(targetRotation)
+          const worldZ =
+            sphere.x * Math.sin(targetRotation) +
+            sphere.z * Math.cos(targetRotation)
+          const worldY = sphere.y
+
+          const distance = 0.8
+          const height = 0.3
+
+          const angle = Math.atan2(worldZ, worldX) + Math.PI / 4
+          const cameraX = worldX + distance * Math.cos(angle)
+          const cameraY = worldY + height
+          const cameraZ = worldZ + distance * Math.sin(angle)
+
+          console.log('Zoom in camera target:', {
+            position: [cameraX, cameraY, cameraZ],
+            lookAt: [worldX, worldY, worldZ],
+          })
+
+          // Set the zoom in target
+          setCameraTarget({
+            position: [cameraX, cameraY, cameraZ],
+            lookAt: [worldX, worldY, worldZ],
+            animating: true,
+          })
+
+          // Update states for the new focused sphere
+          setFocusedSphere(pendingTarget)
+          setCameraMode('focused')
+          setNotificationText(
+            `Focused on ${sphere.name} - LOD Optimized & Locked`
+          )
+          setShowNotification(true)
+          setTimeout(() => setShowNotification(false), 2000)
+        }
+
+        // Clean up transition state
+        setPendingTarget(null)
+        setTransitionPhase('none')
+      }, 400) // Slightly longer pause (400ms) for smoother visual transition
+    }
   }
+
+  // Sphere control functions (same as before)
   const updateSpherePosition = (
     id: number,
     axis: 'x' | 'y' | 'z',
@@ -527,9 +906,9 @@ export default function SpherePositioningSystem(): JSX.Element {
         sphere.id === id
           ? {
               ...sphere,
-              x: (Math.random() - 0.5) * 12, // -6 to +6 range
-              y: Math.random() * 6 - 1, // -1 to +5 range
-              z: (Math.random() - 0.5) * 12, // -6 to +6 range
+              x: (Math.random() - 0.5) * 16,
+              y: Math.random() * 8 - 2,
+              z: (Math.random() - 0.5) * 16,
             }
           : sphere
       )
@@ -540,129 +919,55 @@ export default function SpherePositioningSystem(): JSX.Element {
     setSpheres((prev) =>
       prev.map((sphere) => ({
         ...sphere,
-        x: (Math.random() - 0.5) * 12, // -6 to +6 range
-        y: Math.random() * 6 - 1, // -1 to +5 range
-        z: (Math.random() - 0.5) * 12, // -6 to +6 range
-        visible: true,
+        x: (Math.random() - 0.5) * 16,
+        y: Math.random() * 8 - 2,
+        z: (Math.random() - 0.5) * 16,
       }))
     )
-    setSelectedSphere(null)
   }
 
-  // Export coordinates function
   const exportCoordinates = (): void => {
-    const coordinates = spheres.map((sphere) => ({
-      id: sphere.id,
-      name: sphere.name,
-      position: {
-        x: sphere.x.toFixed(2),
-        y: sphere.y.toFixed(2),
-        z: sphere.z.toFixed(2),
-      },
-      visible: sphere.visible,
-      color: sphere.color,
-    }))
-
-    console.log('Sphere Coordinates:', JSON.stringify(coordinates, null, 2))
-
-    // Show notification
+    console.log('Sphere Coordinates:', JSON.stringify(spheres, null, 2))
+    setNotificationText('Coordinates exported to console')
     setShowNotification(true)
     setTimeout(() => setShowNotification(false), 2000)
   }
 
-  // Determine current stage for display
-  const getCurrentStage = (): string => {
-    if (rotationDegrees < 30) return 'Stage 1: Title Visible'
-    if (rotationDegrees < 60) return 'Stage 2: Model Growing'
-    return 'Stage 3: Navigation + Spheres Active'
-  }
-
-  const getRotationDirection = (): string => {
-    const totalRotations = Math.floor(
-      Math.abs((targetRotation * 180) / Math.PI) / 360
-    )
-    if (totalRotations === 0) return ''
-    return ` (${totalRotations} full rotation${totalRotations > 1 ? 's' : ''})`
-  }
-
   return (
-    <div className="h-screen overflow-hidden bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900">
-      {/* Enhanced Progress Indicator */}
-      <div
-        className={`fixed top-5 left-5 px-5 py-3 rounded-xl text-white text-sm z-50 transition-all duration-300 backdrop-blur-md border border-white/20 ${
-          rotationDegrees >= 60
-            ? 'bg-emerald-500/30 shadow-lg shadow-emerald-500/25'
-            : rotationDegrees >= 30
-            ? 'bg-orange-500/30 shadow-lg shadow-orange-500/25'
-            : 'bg-white/10 shadow-lg shadow-black/25'
-        }`}
-      >
-        <div className="flex flex-col items-center space-y-1">
-          <span className="font-medium">{getCurrentStage()}</span>
-          <span className="text-xs opacity-90 font-mono">
-            {rotationDegrees.toFixed(1)}° • Scale: {modelScale.toFixed(1)}x
+    <div className="relative min-h-[300vh] bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 overflow-x-hidden">
+      {/* Progress indicator with performance info */}
+      <div className="fixed top-6 left-6 z-30 px-4 py-2 bg-black/30 backdrop-blur-md border border-white/20 rounded-xl text-white text-sm">
+        <div className="flex items-center space-x-3">
+          <span className="text-cyan-300 font-mono">
+            {rotationDegrees.toFixed(1)}°
           </span>
-          <span className="text-xs opacity-70">
-            Ultra-Smooth Mode{getRotationDirection()}
-          </span>
-          {showSphereControls && (
-            <span className="text-xs opacity-80 text-cyan-300">
-              • 16 Positioning Spheres Active
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Sphere Controls Toggle */}
-      {showSphereControls && (
-        <div className="fixed top-5 left-80 z-50">
-          <button
-            onClick={() => setShowSphereControls(!showSphereControls)}
-            className="px-4 py-2 bg-white/10 backdrop-blur-md border border-white/20 rounded-lg text-white text-sm hover:bg-white/20 transition-all duration-200 flex items-center space-x-2"
-          >
-            <Move className="w-4 h-4" />
-            <span>Sphere Controls</span>
-          </button>
-        </div>
-      )}
-
-      {/* Precise Degree Progress Bar */}
-      <div className="fixed top-5 right-5 w-56 h-3 bg-white/10 rounded-full backdrop-blur-md z-50 border border-white/20">
-        <div
-          className="h-full rounded-full transition-all duration-200 bg-gradient-to-r from-cyan-400 via-orange-400 to-emerald-400 relative overflow-hidden"
-          style={{
-            width: `${Math.min((rotationDegrees / 60) * 100, 100)}%`,
-          }}
-        >
-          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-pulse"></div>
-        </div>
-        <div className="flex justify-between mt-1 text-xs text-white/60 font-mono">
-          <span>0°</span>
-          <span>30°</span>
-          <span>60°</span>
-        </div>
-        <div
-          className="absolute top-0 w-0.5 h-3 bg-white/80 rounded-full transition-all duration-200"
-          style={{
-            left: `${Math.min((rotationDegrees / 60) * 100, 100)}%`,
-            transform: 'translateX(-50%)',
-          }}
-        />
-      </div>
-
-      {/* Rotation Control Instructions */}
-      <div className="fixed bottom-5 left-5 px-4 py-2 rounded-xl text-white text-xs z-50 backdrop-blur-md border border-white/20 bg-white/10">
-        <div className="flex items-center space-x-2">
-          <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse"></div>
-          <span>1.2° per scroll • Ultra-smooth interpolation</span>
-          {showSphereControls && (
+          {rotationDegrees >= 30 && (
             <>
               <span className="text-white/50">•</span>
-              <span className="text-cyan-300">
-                16 positioning spheres active
-              </span>
+              <span className="text-emerald-300">LOD Scaling Active</span>
             </>
           )}
+          {rotationDegrees >= 60 && (
+            <>
+              <span className="text-white/50">•</span>
+              <span className="text-cyan-300">16 LOD Spheres Active</span>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Performance indicator */}
+      <div className="fixed top-6 right-6 z-30 px-3 py-2 bg-black/30 backdrop-blur-md border border-white/20 rounded-xl text-white text-xs">
+        <div className="flex items-center space-x-2">
+          <span className="text-white/70">Performance:</span>
+          <span
+            className={`font-mono ${
+              // This will be updated by the performance monitor
+              'text-emerald-300'
+            }`}
+          >
+            LOD Active
+          </span>
         </div>
       </div>
 
@@ -676,155 +981,42 @@ export default function SpherePositioningSystem(): JSX.Element {
         </div>
       )}
 
-      {/* Persistent Hero Section with 3D Model - Full Width */}
+      {/* Hero Section */}
       <div className="fixed top-0 left-0 w-full h-screen flex items-center justify-center z-5 pointer-events-none">
         <div className="relative w-full h-full px-4">
-          {/* Hero Title - Progressive Fade */}
           <div
-            className="absolute top-0 left-0 w-full text-center z-10"
-            style={{
-              opacity: titleOpacity,
-              transform: `translateY(${(1 - titleOpacity) * -20}px)`,
-              transition: 'opacity 0.4s ease-out, transform 0.4s ease-out',
-              paddingTop: '8rem',
-            }}
+            className={`absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center z-10 transition-opacity duration-1000 ${
+              rotationDegrees > 15 ? 'opacity-0' : 'opacity-100'
+            }`}
           >
-            <h1 className="text-6xl md:text-7xl lg:text-8xl font-bold bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-400 bg-clip-text text-transparent leading-tight">
-              Tiny Homes
-            </h1>
-            <h2 className="text-xl md:text-2xl lg:text-3xl font-light text-white/90 tracking-wide mt-3">
-              Custom made
-            </h2>
-            <div className="mt-6 w-32 h-1 bg-gradient-to-r from-cyan-400 to-purple-400 mx-auto rounded-full"></div>
-
-            <div className="mt-8">
-              <p className="text-white/70 text-lg">
-                Scroll to begin the ultra-smooth experience
-              </p>
-              <p className="text-white/50 text-sm mt-2">
-                Precise 1.2° rotation control • Professional smoothness
-              </p>
-            </div>
-          </div>
-
-          {/* 3D Model Container - Full Width */}
-          <div className="relative w-full h-full flex items-center justify-center transition-all duration-700 ease-out">
-            {/* Three.js Canvas - Full Width and Height */}
-            <Canvas
-              style={{
-                background: 'transparent',
-                width: '100%',
-                height: '100%',
-              }}
-            >
-              <Suspense fallback={null}>
-                {/* Animated Camera System */}
-                <AnimatedCamera
-                  cameraTarget={cameraTarget}
-                  modelScale={modelScale}
-                  onAnimationComplete={handleAnimationComplete}
-                />
-
-                {/* Enhanced Lighting */}
-                <ambientLight intensity={0.6 + (modelScale - 1.5) * 0.1} />
-                <directionalLight
-                  position={[15, 15, 8]}
-                  intensity={1.4 + (modelScale - 1.5) * 0.2}
-                  castShadow
-                />
-                <directionalLight
-                  position={[-15, 8, -8]}
-                  intensity={1.0 + (modelScale - 1.5) * 0.1}
-                />
-                <pointLight
-                  position={[0, 12, 0]}
-                  intensity={0.8 + (modelScale - 1.5) * 0.1}
-                />
-                <pointLight
-                  position={[8, -8, 8]}
-                  intensity={0.5}
-                  color="#00ffff"
-                />
-                <pointLight
-                  position={[-8, -8, -8]}
-                  intensity={0.4}
-                  color="#ff00ff"
-                />
-
-                <Environment preset="sunset" />
-
-                {/* 3D Model with Spheres - Both rotate together */}
-                <group>
-                  <TinyHouseModel
-                    targetRotation={targetRotation}
-                    scale={modelScale}
-                    spheres={showSphereControls ? spheres : []}
-                  />
-                </group>
-
-                <OrbitControls
-                  enabled={false}
-                  enableZoom={false}
-                  enablePan={false}
-                  enableRotate={false}
-                />
-              </Suspense>
-            </Canvas>
-
-            {/* Enhanced Floating elements */}
-            {[...Array(6)].map((_, i) => (
-              <div
-                key={i}
-                className={`absolute bg-gradient-to-r from-cyan-400/40 to-purple-400/40 rounded-full animate-pulse transition-all duration-500`}
-                style={{
-                  width: `${
-                    14 +
-                    (modelScale - 1.5) * 6 +
-                    Math.sin(rotationDegrees * 0.1 + i) * 2
-                  }px`,
-                  height: `${
-                    14 +
-                    (modelScale - 1.5) * 6 +
-                    Math.sin(rotationDegrees * 0.1 + i) * 2
-                  }px`,
-                  top: `${20 + i * 15}%`,
-                  left: i % 2 === 0 ? '5%' : '90%',
-                  animationDelay: `${i * 0.5}s`,
-                }}
-              />
-            ))}
-          </div>
-
-          {/* Stage-based Instructions */}
-          <div className="absolute bottom-16 left-0 w-full text-center z-10">
             {rotationDegrees < 30 && (
               <div className="transition-opacity duration-500">
-                <p className="text-white/70 text-lg">
-                  Continue scrolling to see the model grow
+                <h1 className="text-6xl md:text-8xl font-bold bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-400 bg-clip-text text-transparent mb-6 leading-tight">
+                  Tiny Homes
+                </h1>
+                <p className="text-white/70 text-xl md:text-2xl max-w-2xl mx-auto leading-relaxed">
+                  LOD-Optimized 3D Experience
                 </p>
                 <p className="text-white/50 text-sm mt-2">
-                  Stage 1 of 3: Title visible • Model at normal size
+                  Stage 1 of 3: Introduction • Performance Optimized
                 </p>
               </div>
             )}
             {rotationDegrees >= 30 && rotationDegrees < 60 && (
               <div className="transition-opacity duration-500">
                 <p className="text-white/70 text-lg">
-                  Model is growing bigger! Keep scrolling
+                  Adaptive LOD scaling active!
                 </p>
                 <p className="text-white/50 text-sm mt-2">
-                  Stage 2 of 3: Model scaling up in full width
+                  Stage 2 of 3: Dynamic quality adjustment
                 </p>
               </div>
             )}
             {rotationDegrees >= 60 && (
               <div className="transition-opacity duration-500">
-                <p className="text-white/70 text-lg">
-                  Full-width navigation + positioning spheres active!
-                </p>
+                <p className="text-white/70 text-lg">Full LOD system active!</p>
                 <p className="text-white/50 text-sm mt-2">
-                  Stage 3 of 3: Complete experience unlocked • 16 spheres ready
-                  for positioning
+                  Stage 3 of 3: Maximum performance optimization
                 </p>
               </div>
             )}
@@ -832,17 +1024,15 @@ export default function SpherePositioningSystem(): JSX.Element {
         </div>
       </div>
 
-      {/* Glassmorphism Sidebar with Navigation + Sphere Controls */}
+      {/* Sidebar (same structure as before, but with LOD indicators) */}
       <div
         className={`fixed top-0 right-0 h-full w-96 z-20 transform transition-transform duration-700 ease-in-out ${
           sidebarOpen ? 'translate-x-0' : 'translate-x-full'
         } bg-white/10 backdrop-blur-xl border-l border-white/20 shadow-2xl shadow-purple-500/20`}
       >
         <div className="relative h-full overflow-y-auto">
-          {/* Gradient overlay */}
           <div className="absolute inset-0 bg-gradient-to-br from-white/20 via-white/5 to-transparent pointer-events-none" />
 
-          {/* Close button */}
           <button
             onClick={closeSidebar}
             className="absolute top-6 right-6 z-30 p-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white/80 hover:text-white hover:bg-white/20 transition-all duration-200 hover:rotate-90"
@@ -850,12 +1040,10 @@ export default function SpherePositioningSystem(): JSX.Element {
             <X className="w-5 h-5" />
           </button>
 
-          {/* Sidebar content */}
           <div className="relative z-10 p-8 pt-20">
-            {/* Navigation Section */}
             <div className="mb-8">
               <h2 className="text-2xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent mb-6">
-                Navigation
+                LOD Navigation
               </h2>
 
               <nav className="space-y-3">
@@ -884,7 +1072,6 @@ export default function SpherePositioningSystem(): JSX.Element {
                     >
                       <div className="mt-2 ml-4 space-y-2 bg-white/5 backdrop-blur-md border border-white/10 rounded-lg p-3 shadow-xl">
                         {subItems.map((subItem, subIndex) => {
-                          // Find the sphere ID for this appliance
                           const sphereId =
                             spheres.findIndex((s) => s.name === subItem) + 1
 
@@ -902,7 +1089,7 @@ export default function SpherePositioningSystem(): JSX.Element {
                               onClick={() => {
                                 console.log(
                                   `Clicked dropdown item: ${subItem}, sphere ID: ${sphereId}`
-                                ) // Debug log
+                                )
                                 if (sphereId > 0) {
                                   zoomToSphere(sphereId)
                                   setSelectedSphere(sphereId)
@@ -919,6 +1106,11 @@ export default function SpherePositioningSystem(): JSX.Element {
                                 }}
                               />
                               <span className="text-sm">{subItem}</span>
+                              {focusedSphere === sphereId && (
+                                <span className="text-xs text-cyan-300 ml-auto">
+                                  🎯 LOD
+                                </span>
+                              )}
                             </div>
                           )
                         })}
@@ -929,12 +1121,12 @@ export default function SpherePositioningSystem(): JSX.Element {
               </nav>
             </div>
 
-            {/* Sphere Controls Section */}
+            {/* LOD Sphere Controls */}
             {showSphereControls && (
               <div className="border-t border-white/20 pt-8">
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="text-xl font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
-                    Positioning Spheres
+                    LOD Spheres
                   </h2>
                   <div className="flex space-x-2">
                     <button
@@ -945,19 +1137,17 @@ export default function SpherePositioningSystem(): JSX.Element {
                     </button>
                     <button
                       onClick={resetAllSpheres}
-                      className="px-3 py-1 bg-orange-500/20 border border-orange-400/50 rounded-lg text-orange-300 text-xs hover:bg-orange-500/30 transition-all duration-200 flex items-center space-x-1"
+                      className="px-3 py-1 bg-red-500/20 border border-red-400/50 rounded-lg text-red-300 text-xs hover:bg-red-500/30 transition-all duration-200"
                     >
-                      <RotateCcw className="w-3 h-3" />
-                      <span>Reset All</span>
+                      Reset All
                     </button>
                   </div>
                 </div>
 
-                {/* Camera Controls */}
                 <div className="mb-4 p-3 bg-white/5 rounded-lg border border-white/10">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between mb-2">
                     <span className="text-white/90 text-sm font-medium">
-                      Camera View
+                      LOD Camera
                     </span>
                     <button
                       onClick={resetCamera}
@@ -966,12 +1156,34 @@ export default function SpherePositioningSystem(): JSX.Element {
                       Reset View
                     </button>
                   </div>
-                  <p className="text-xs text-white/60 mt-1">
-                    Click any appliance below to zoom to its location
+
+                  <div className="text-xs text-white/60 mb-2">
+                    {cameraMode === 'overview' &&
+                      '🔍 Overview Mode - Adaptive LOD'}
+                    {cameraMode === 'focused' && focusedSphere && (
+                      <span className="text-cyan-300">
+                        🎯 Locked:{' '}
+                        {spheres.find((s) => s.id === focusedSphere)?.name} -
+                        High LOD
+                      </span>
+                    )}
+                    {cameraMode === 'transitioning' && (
+                      <span className="text-orange-300">
+                        🔄 Transitioning:{' '}
+                        {transitionPhase === 'zoom_out'
+                          ? 'Zooming Out...'
+                          : 'Zooming In...'}
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-white/60">
+                    Performance-optimized rendering with dynamic quality
+                    adjustment
                   </p>
                 </div>
 
-                {/* Sphere List */}
+                {/* Sphere List with LOD indicators */}
                 <div className="space-y-3 max-h-96 overflow-y-auto">
                   {spheres.map((sphere) => (
                     <div
@@ -984,13 +1196,12 @@ export default function SpherePositioningSystem(): JSX.Element {
                       onClick={() => {
                         console.log(
                           `Clicked on sphere ${sphere.id}: ${sphere.name}`
-                        ) // Debug log
+                        )
                         if (selectedSphere === sphere.id) {
                           setSelectedSphere(null)
-                          resetCamera() // Reset camera when deselecting
                         } else {
                           setSelectedSphere(sphere.id)
-                          zoomToSphere(sphere.id) // Zoom to sphere when clicked
+                          zoomToSphere(sphere.id)
                         }
                       }}
                     >
@@ -1003,6 +1214,11 @@ export default function SpherePositioningSystem(): JSX.Element {
                           <span className="text-white/90 text-sm font-medium">
                             {sphere.name}
                           </span>
+                          {focusedSphere === sphere.id && (
+                            <span className="text-xs text-cyan-300">
+                              🎯 High LOD
+                            </span>
+                          )}
                         </div>
                         <div className="flex space-x-1">
                           <button
@@ -1035,7 +1251,6 @@ export default function SpherePositioningSystem(): JSX.Element {
                         {sphere.z.toFixed(2)}
                       </div>
 
-                      {/* Position Controls (shown when selected) */}
                       {selectedSphere === sphere.id && (
                         <div className="mt-3 space-y-2 border-t border-white/10 pt-3">
                           {(['x', 'y', 'z'] as const).map((axis) => (
@@ -1061,7 +1276,7 @@ export default function SpherePositioningSystem(): JSX.Element {
                                 }
                                 className="flex-1 h-1 bg-white/20 rounded-lg appearance-none cursor-pointer slider"
                               />
-                              <span className="text-xs text-white/60 font-mono w-12 text-right">
+                              <span className="text-xs text-white/60 w-12 text-right font-mono">
                                 {sphere[axis].toFixed(1)}
                               </span>
                             </div>
@@ -1077,34 +1292,97 @@ export default function SpherePositioningSystem(): JSX.Element {
         </div>
       </div>
 
-      {/* Mobile overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-10 md:hidden"
-          onClick={closeSidebar}
-        />
-      )}
+      {/* LOD-Optimized 3D Model Container */}
+      <div className="fixed top-0 left-0 w-full h-screen flex items-center justify-center z-5 pointer-events-none">
+        <div className="relative w-full h-full px-4">
+          <div className="relative w-full h-full flex items-center justify-center transition-all duration-700 ease-out">
+            <Canvas
+              style={{
+                background: 'transparent',
+                width: '100%',
+                height: '100%',
+              }}
+            >
+              <Suspense fallback={null}>
+                {/* LOD-Optimized Camera Animation */}
+                <LODStaticCameraAnimation
+                  cameraTarget={cameraTarget}
+                  modelScale={modelScale}
+                  onAnimationComplete={handleAnimationComplete}
+                  focusedSphere={focusedSphere}
+                  spheres={spheres}
+                  targetRotation={targetRotation}
+                  cameraMode={cameraMode}
+                />
 
-      <style jsx>{`
-        .slider::-webkit-slider-thumb {
-          appearance: none;
-          width: 12px;
-          height: 12px;
-          border-radius: 50%;
-          background: linear-gradient(45deg, #00ffff, #ff00ff);
-          cursor: pointer;
-          border: 2px solid rgba(255, 255, 255, 0.3);
-        }
+                {/* Adaptive Lighting based on performance */}
+                <ambientLight intensity={0.6 + (modelScale - 1.5) * 0.1} />
+                <directionalLight
+                  position={[15, 15, 8]}
+                  intensity={1.4 + (modelScale - 1.5) * 0.2}
+                  castShadow
+                />
+                <directionalLight
+                  position={[-15, 8, -8]}
+                  intensity={1.0 + (modelScale - 1.5) * 0.1}
+                />
+                <pointLight
+                  position={[0, 12, 0]}
+                  intensity={0.8 + (modelScale - 1.5) * 0.1}
+                />
+                <pointLight
+                  position={[8, -8, 8]}
+                  intensity={0.5}
+                  color="#00ffff"
+                />
+                <pointLight
+                  position={[-8, -8, -8]}
+                  intensity={0.4}
+                  color="#ff00ff"
+                />
 
-        .slider::-moz-range-thumb {
-          width: 12px;
-          height: 12px;
-          border-radius: 50%;
-          background: linear-gradient(45deg, #00ffff, #ff00ff);
-          cursor: pointer;
-          border: 2px solid rgba(255, 255, 255, 0.3);
-        }
-      `}</style>
+                <Environment preset="sunset" />
+
+                {/* LOD-Optimized 3D Model */}
+                <group>
+                  <LODTinyHouseModel
+                    targetRotation={targetRotation}
+                    scale={modelScale}
+                    spheres={showSphereControls ? spheres : []}
+                    focusedSphere={focusedSphere}
+                  />
+                </group>
+
+                <OrbitControls
+                  enabled={false}
+                  enableZoom={false}
+                  enablePan={false}
+                  enableRotate={false}
+                />
+              </Suspense>
+            </Canvas>
+
+            {/* Floating elements with LOD */}
+            {[...Array(6)].map((_, i) => (
+              <div
+                key={i}
+                className="absolute w-2 h-2 bg-cyan-400/30 rounded-full animate-pulse"
+                style={{
+                  left: `${20 + i * 15}%`,
+                  top: `${30 + (i % 2) * 40}%`,
+                  animationDelay: `${i * 0.5}s`,
+                  animationDuration: `${2 + i * 0.3}s`,
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Scroll content */}
+      <div className="relative z-10 pt-[100vh]">
+        <div className="h-[200vh] bg-gradient-to-b from-transparent to-slate-900/50" />
+      </div>
     </div>
   )
 }

@@ -47,6 +47,24 @@
     @apply row-span-2 lg:col-span-2;
     height: var(--row-height);
   }
+
+  &.filled {
+    & > *:nth-child(6n + 1) {
+      @apply bg-violet;
+    }
+
+    & > *:nth-child(6n + 2) {
+      @apply bg-accent-8;
+    }
+
+    & > *:nth-child(6n + 3) {
+      @apply bg-pink;
+    }
+
+    & > *:nth-child(6n + 6) {
+      @apply bg-cyan;
+    }
+  }
 }
 
 .layoutC {
