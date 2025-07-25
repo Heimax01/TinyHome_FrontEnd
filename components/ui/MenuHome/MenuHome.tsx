@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useGLTF, OrbitControls, Environment } from '@react-three/drei'
-import type { Group, Vector3 } from 'three'
+import type { Group } from 'three'
 import { Vector3 as ThreeVector3 } from 'three'
 
 // Interface for sphere positioning data
@@ -224,174 +224,130 @@ function LODPositioningSphere({
   )
 }
 
-// Ultra-Close Camera Positioning System with Minimal Distance
-function UltraCloseCameraAnimation({
-  cameraTarget,
-  modelScale,
-  onAnimationComplete,
-  focusedSphere,
-  spheres,
-  cameraMode,
-}: {
-  cameraTarget: {
-    position: [number, number, number]
-    lookAt: [number, number, number]
-    animating: boolean
-  }
-  modelScale: number
-  onAnimationComplete: () => void
-  focusedSphere: number | null
-  spheres: SpherePosition[]
-  cameraMode: 'overview' | 'focused' | 'transitioning'
-}) {
-  const { camera } = useThree()
-  const currentPosition = useRef<[number, number, number]>([0, 3, 8])
-  const currentLookAt = useRef<[number, number, number]>([0, 0, 0])
-  const isAnimating = useRef<boolean>(false)
-  const isLocked = useRef<boolean>(false)
+// Ultra-Smooth OrbitControls Component (RENAMED to avoid conflict)
+function SmoothCameraControls() {
+  const { camera, gl } = useThree()
+  const controlsRef = useRef<any>(null)
 
-  // Performance monitoring for adaptive quality
-  const fps = usePerformanceMonitor()
+  // Ultra-smooth zoom state
+  const targetZoom = useRef<number>(1)
+  const currentZoom = useRef<number>(1)
+  const zoomVelocity = useRef<number>(0)
+  const isZooming = useRef<boolean>(false)
 
-  // Ultra-smooth animation quality
-  const animationQuality = useMemo(() => {
-    if (fps < 30) return { lerpFactor: 0.08, updateFrequency: 2 }
-    if (fps < 45) return { lerpFactor: 0.06, updateFrequency: 1 }
-    return { lerpFactor: 0.04, updateFrequency: 1 } // Ultra-smooth for cinematic feel
-  }, [fps])
+  // Smooth zoom parameters
+  const ZOOM_DAMPING = 0.08 // Ultra-smooth damping factor
+  const ZOOM_SENSITIVITY = 0.002 // Very fine zoom sensitivity
+  const ZOOM_FRICTION = 0.92 // Smooth deceleration
+  const MIN_ZOOM_VELOCITY = 0.001 // Minimum velocity threshold
 
-  const frameCounter = useRef<number>(0)
+  useEffect(() => {
+    if (controlsRef.current) {
+      const controls = controlsRef.current
 
-  useFrame(() => {
-    frameCounter.current++
+      // Custom wheel event handler for ultra-smooth zoom
+      const handleWheel = (event: WheelEvent) => {
+        event.preventDefault()
 
-    // Skip frames for performance if needed
-    if (frameCounter.current % animationQuality.updateFrequency !== 0) return
+        // Calculate zoom delta with ultra-fine sensitivity
+        const delta = event.deltaY * ZOOM_SENSITIVITY
 
-    if (cameraTarget.animating && !isAnimating.current) {
-      // Start new animation - capture current position
-      currentPosition.current = [
-        camera.position.x,
-        camera.position.y,
-        camera.position.z,
-      ]
-      currentLookAt.current = [
-        cameraTarget.lookAt[0],
-        cameraTarget.lookAt[1],
-        cameraTarget.lookAt[2],
-      ]
-      isAnimating.current = true
+        // Apply zoom delta to target
+        targetZoom.current = Math.max(
+          0.1,
+          Math.min(50, targetZoom.current + delta)
+        )
+
+        // Start zooming animation
+        isZooming.current = true
+
+        // Add velocity for momentum
+        zoomVelocity.current += delta * 0.1
+
+        console.log(`Ultra-Smooth Zoom:`)
+        console.log(`Delta: ${delta.toFixed(4)}`)
+        console.log(`Target Zoom: ${targetZoom.current.toFixed(3)}`)
+        console.log(`Current Zoom: ${currentZoom.current.toFixed(3)}`)
+      }
+
+      // Add custom wheel listener to canvas
+      const canvas = gl.domElement
+      canvas.addEventListener('wheel', handleWheel, { passive: false })
+
+      // Disable default OrbitControls zoom
+      controls.enableZoom = false
+
+      return () => {
+        canvas.removeEventListener('wheel', handleWheel)
+      }
     }
+  }, [gl])
 
-    if (cameraTarget.animating || isAnimating.current) {
-      // Use ultra-smooth lerp factor
-      const lerpFactor = animationQuality.lerpFactor
+  // Ultra-smooth zoom animation
+  useFrame(() => {
+    if (controlsRef.current && isZooming.current) {
+      // Smooth interpolation towards target zoom
+      const zoomDiff = targetZoom.current - currentZoom.current
+      currentZoom.current += zoomDiff * ZOOM_DAMPING
 
-      // Animate position
-      currentPosition.current[0] +=
-        (cameraTarget.position[0] - currentPosition.current[0]) * lerpFactor
-      currentPosition.current[1] +=
-        (cameraTarget.position[1] - currentPosition.current[1]) * lerpFactor
-      currentPosition.current[2] +=
-        (cameraTarget.position[2] - currentPosition.current[2]) * lerpFactor
+      // Apply friction to velocity
+      zoomVelocity.current *= ZOOM_FRICTION
 
-      // Animate look-at
-      currentLookAt.current[0] +=
-        (cameraTarget.lookAt[0] - currentLookAt.current[0]) * lerpFactor
-      currentLookAt.current[1] +=
-        (cameraTarget.lookAt[1] - currentLookAt.current[1]) * lerpFactor
-      currentLookAt.current[2] +=
-        (cameraTarget.lookAt[2] - currentLookAt.current[2]) * lerpFactor
-
-      // Apply camera position and look-at
-      camera.position.set(...currentPosition.current)
-      camera.lookAt(...currentLookAt.current)
-
-      // Check if animation is complete
-      const positionDistance = Math.sqrt(
-        Math.pow(cameraTarget.position[0] - currentPosition.current[0], 2) +
-          Math.pow(cameraTarget.position[1] - currentPosition.current[1], 2) +
-          Math.pow(cameraTarget.position[2] - currentPosition.current[2], 2)
-      )
-
-      const lookAtDistance = Math.sqrt(
-        Math.pow(cameraTarget.lookAt[0] - currentLookAt.current[0], 2) +
-          Math.pow(cameraTarget.lookAt[1] - currentLookAt.current[1], 2) +
-          Math.pow(cameraTarget.lookAt[2] - currentLookAt.current[2], 2)
-      )
-
-      // Animation complete when both position and look-at are close enough
-      if (positionDistance < 0.08 && lookAtDistance < 0.08) {
-        isAnimating.current = false
-        isLocked.current = focusedSphere !== null
-        onAnimationComplete()
+      // Stop zooming when close enough and velocity is low
+      if (
+        Math.abs(zoomDiff) < 0.01 &&
+        Math.abs(zoomVelocity.current) < MIN_ZOOM_VELOCITY
+      ) {
+        isZooming.current = false
+        currentZoom.current = targetZoom.current
       }
-    } else if (
-      isLocked.current &&
-      focusedSphere &&
-      spheres.length > 0 &&
-      cameraMode !== 'transitioning'
-    ) {
-      // ULTRA-CLOSE SPHERE POSITIONING SYSTEM
-      const sphere = spheres.find((s) => s.id === focusedSphere)
-      if (sphere) {
-        // Sphere coordinates
-        const sphereX = sphere.x
-        const sphereY = sphere.y
-        const sphereZ = sphere.z
 
-        // ULTRA-CLOSE DISTANCE: Much closer than 5 units
-        // Options: 0.5, 0.8, 1.0, 1.5 units for very close positioning
-        const ULTRA_CLOSE_DISTANCE = 0.8 // Very close - almost touching the sphere
+      // Calculate camera distance based on zoom
+      const baseDistance = 6 // Base distance from target
+      const newDistance = baseDistance / currentZoom.current
 
-        // PERFECT SYMMETRY: Camera X and Y match sphere X and Y exactly
-        const cameraX = sphereX // SAME X as sphere for perfect horizontal centering
-        const cameraY = sphereY // SAME Y as sphere for perfect vertical centering
-        const cameraZ = sphereZ + ULTRA_CLOSE_DISTANCE // Ultra-close distance
+      // Get current camera direction
+      const direction = new ThreeVector3()
+      camera.getWorldDirection(direction)
+      direction.negate() // Reverse direction to point towards camera
 
-        // Set camera to EXACT position for ultra-close sphere viewing
-        camera.position.set(cameraX, cameraY, cameraZ)
-        camera.lookAt(sphereX, sphereY, sphereZ)
+      // Calculate new camera position
+      const target = controlsRef.current.target
+      const newPosition = target
+        .clone()
+        .add(direction.multiplyScalar(newDistance))
 
-        // Debug logging for verification
-        console.log(`Ultra-Close Positioning:`)
-        console.log(`Sphere: (${sphereX}, ${sphereY}, ${sphereZ})`)
-        console.log(`Camera: (${cameraX}, ${cameraY}, ${cameraZ})`)
-        console.log(`Distance: ${ULTRA_CLOSE_DISTANCE} units (ULTRA-CLOSE)`)
-      }
-    } else {
-      // Default camera behavior with ultra-smooth movement
-      const defaultPosition: [number, number, number] = [
-        0,
-        3,
-        8 - (modelScale - 1.5) * 1.5,
-      ]
-      const defaultLookAt: [number, number, number] = [0, 0, 0]
-      const defaultLerpFactor = fps > 45 ? 0.015 : 0.01
+      // Smoothly move camera to new position
+      camera.position.lerp(newPosition, ZOOM_DAMPING)
 
-      currentPosition.current[0] +=
-        (defaultPosition[0] - currentPosition.current[0]) * defaultLerpFactor
-      currentPosition.current[1] +=
-        (defaultPosition[1] - currentPosition.current[1]) * defaultLerpFactor
-      currentPosition.current[2] +=
-        (defaultPosition[2] - currentPosition.current[2]) * defaultLerpFactor
-
-      currentLookAt.current[0] +=
-        (defaultLookAt[0] - currentLookAt.current[0]) * defaultLerpFactor
-      currentLookAt.current[1] +=
-        (defaultLookAt[1] - currentLookAt.current[1]) * defaultLerpFactor
-      currentLookAt.current[2] +=
-        (defaultLookAt[2] - currentLookAt.current[2]) * defaultLerpFactor
-
-      camera.position.set(...currentPosition.current)
-      camera.lookAt(...currentLookAt.current)
+      // Update controls
+      controlsRef.current.update()
     }
   })
 
-  return null
+  return (
+    <OrbitControls
+      ref={controlsRef}
+      makeDefault
+      enableZoom={false} // Disabled - using custom ultra-smooth zoom
+      enablePan={true}
+      enableRotate={true}
+      dampingFactor={0.03} // Ultra-smooth damping for rotation and pan
+      enableDamping={true}
+      maxDistance={50}
+      minDistance={0.1}
+      maxPolarAngle={Math.PI}
+      minPolarAngle={0}
+      screenSpacePanning={true}
+      rotateSpeed={0.8} // Slightly slower for smoothness
+      panSpeed={0.6} // Slightly slower for smoothness
+      autoRotate={false}
+      autoRotateSpeed={0}
+    />
+  )
 }
 
-// LOD-Optimized 3D Model Component (No Rotation)
+// LOD-Optimized 3D Model Component
 function LODTinyHouseModel({
   scale,
   spheres = [],
@@ -406,10 +362,8 @@ function LODTinyHouseModel({
   // Load the 3D model
   const { scene } = useGLTF('/tiny_home/Tiny_House.glb')
 
-  // No rotation logic - house stays in fixed orientation
-
   return (
-    <group ref={meshRef} scale={[scale, scale, scale]} position={[0, -5, -10]}>
+    <group ref={meshRef} scale={[scale, scale, scale]} position={[0, -5, 10]}>
       {/* House Model - Fixed orientation */}
       <primitive object={scene} />
 
@@ -428,32 +382,15 @@ function LODTinyHouseModel({
   )
 }
 
-export default function UltraCloseSphereCamera() {
-  // Simplified state management - scroll-based scaling only
-  const [scrollProgress, setScrollProgress] = useState<number>(0)
-  const [sidebarOpen, setSidebarOpen] = useState<boolean>(false)
-  const [showSphereControls, setShowSphereControls] = useState<boolean>(false)
+// Main Component (RENAMED to avoid conflict)
+export default function TinyHomesUltraSmooth() {
+  // Simplified state management - no scroll logic
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(true) // Always open by default
   const [selectedSphere, setSelectedSphere] = useState<number | null>(null)
-  const [notificationShown, setNotificationShown] = useState<boolean>(false)
-
-  // Camera and animation states
-  const [cameraTarget, setCameraTarget] = useState<{
-    position: [number, number, number]
-    lookAt: [number, number, number]
-    animating: boolean
-  }>({
-    position: [0, 3, 8],
-    lookAt: [0, 0, 0],
-    animating: false,
-  })
-  const [notificationText, setNotificationText] = useState<string>('')
-  const [showNotification, setShowNotification] = useState<boolean>(false)
   const [focusedSphere, setFocusedSphere] = useState<number | null>(null)
 
-  // Simplified camera mode (no complex transitions)
-  const [cameraMode, setCameraMode] = useState<
-    'overview' | 'focused' | 'transitioning'
-  >('overview')
+  const [notificationText, setNotificationText] = useState<string>('')
+  const [showNotification, setShowNotification] = useState<boolean>(false)
 
   // Dropdown states
   const [dropdownStates, setDropdownStates] = useState({
@@ -533,49 +470,8 @@ export default function UltraCloseSphereCamera() {
     }))
   })
 
-  // Calculate smooth model scale based on scroll progress (0-100%)
-  const modelScale = 1.0 + scrollProgress * 2.0 // Scale from 1.0 to 3.0
-
-  // Calculate title opacity (fades out as we scroll)
-  const titleOpacity = Math.max(1 - scrollProgress * 2, 0) // Fades out faster
-
-  // Calculate sidebar visibility (appears after 50% scroll)
-  const sidebarThreshold = 0.5 // 50% of scroll progress
-  const shouldShowSidebar = scrollProgress >= sidebarThreshold
-
-  // Scroll-based scaling (no rotation)
-  useEffect(() => {
-    const handleScroll = (): void => {
-      const scrollTop = window.pageYOffset
-      const docHeight =
-        document.documentElement.scrollHeight - window.innerHeight
-      const scrollPercent = Math.min(scrollTop / docHeight, 1)
-
-      setScrollProgress(scrollPercent)
-    }
-
-    window.addEventListener('scroll', handleScroll)
-    return () => window.removeEventListener('scroll', handleScroll)
-  }, [])
-
-  // Update sidebar visibility based on scroll progress
-  useEffect(() => {
-    // Show sidebar and spheres when scroll threshold is reached
-    if (shouldShowSidebar && !sidebarOpen) {
-      setSidebarOpen(true)
-      setShowSphereControls(true)
-
-      if (!notificationShown) {
-        setNotificationText('Sidebar and spheres activated!')
-        setShowNotification(true)
-        setTimeout(() => setShowNotification(false), 2000)
-        setNotificationShown(true)
-      }
-    } else if (!shouldShowSidebar && sidebarOpen) {
-      setSidebarOpen(false)
-      setShowSphereControls(false)
-    }
-  }, [scrollProgress, shouldShowSidebar, sidebarOpen, notificationShown])
+  // Fixed model scale - no scroll dependency
+  const modelScale = 3.0
 
   // ESC key handler
   useEffect(() => {
@@ -591,7 +487,6 @@ export default function UltraCloseSphereCamera() {
 
   const closeSidebar = (): void => {
     setSidebarOpen(false)
-    setShowSphereControls(false)
     setSelectedSphere(null)
     setDropdownStates({
       Living_Room: false,
@@ -601,6 +496,10 @@ export default function UltraCloseSphereCamera() {
     })
   }
 
+  const openSidebar = (): void => {
+    setSidebarOpen(true)
+  }
+
   const toggleDropdown = (item: string): void => {
     setDropdownStates((prev) => ({
       ...prev,
@@ -608,70 +507,17 @@ export default function UltraCloseSphereCamera() {
     }))
   }
 
-  // Ultra-close sphere-to-sphere camera transitions with minimal distance
-  const zoomToSphere = (sphereId: number): void => {
-    const sphere = spheres.find((s) => s.id === sphereId)
-    if (!sphere) return
-
-    // Always perform ultra-close zoom to sphere with perfect centering
-    performUltraCloseZoomToSphere(sphereId)
-  }
-
-  const performUltraCloseZoomToSphere = (sphereId: number): void => {
-    const sphere = spheres.find((s) => s.id === sphereId)
-    if (!sphere) return
-
-    // Sphere coordinates
-    const sphereX = sphere.x
-    const sphereY = sphere.y
-    const sphereZ = sphere.z
-
-    // ULTRA-CLOSE POSITIONING SYSTEM:
-    // Camera X and Y match sphere X and Y exactly for perfect symmetry
-    // Camera Z is very close to sphere - much less than 5 units
-    const ULTRA_CLOSE_DISTANCE = 0.8 // Much closer - almost touching the sphere!
-
-    const cameraX = sphereX // SAME X as sphere for perfect horizontal centering
-    const cameraY = sphereY // SAME Y as sphere for perfect vertical centering
-    const cameraZ = sphereZ + ULTRA_CLOSE_DISTANCE // Ultra-close distance
-
-    setCameraTarget({
-      position: [cameraX, cameraY, cameraZ],
-      lookAt: [sphereX, sphereY, sphereZ],
-      animating: true,
-    })
-
+  const selectSphere = (sphereId: number): void => {
+    setSelectedSphere(sphereId)
     setFocusedSphere(sphereId)
-    setCameraMode('focused')
-    setNotificationText(`Ultra-close to ${sphere.name} (0.8 units away)`)
-    setShowNotification(true)
-    setTimeout(() => setShowNotification(false), 3000)
-
-    // Debug logging
-    console.log(`Ultra-Close Zoom to ${sphere.name}:`)
-    console.log(`Sphere Position: (${sphereX}, ${sphereY}, ${sphereZ})`)
-    console.log(`Camera Position: (${cameraX}, ${cameraY}, ${cameraZ})`)
-    console.log(`Distance: ${ULTRA_CLOSE_DISTANCE} units (ULTRA-CLOSE!)`)
-    console.log(`Perfect X/Y Alignment: Camera matches sphere coordinates`)
-  }
-
-  const resetCamera = (): void => {
-    setCameraTarget({
-      position: [0, 3, 8 - (modelScale - 1.5) * 1.5],
-      lookAt: [0, 0, 0],
-      animating: true,
-    })
-
-    setFocusedSphere(null)
-    setCameraMode('overview')
-    setNotificationText('Returned to overview')
-    setShowNotification(true)
-    setTimeout(() => setShowNotification(false), 2000)
-  }
-
-  const handleAnimationComplete = (): void => {
-    // Simplified - no complex transition phases
-    console.log('Ultra-close positioning animation completed')
+    const sphere = spheres.find((s) => s.id === sphereId)
+    if (sphere) {
+      setNotificationText(
+        `Selected ${sphere.name} - Use ultra-smooth OrbitControls to navigate`
+      )
+      setShowNotification(true)
+      setTimeout(() => setShowNotification(false), 3000)
+    }
   }
 
   const updateSpherePosition = (
@@ -728,27 +574,29 @@ export default function UltraCloseSphereCamera() {
   }
 
   return (
-    <div className="relative min-h-[300vh] bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 overflow-x-hidden">
-      {/* Progress indicator */}
+    <div className="relative min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 overflow-hidden">
+      {/* Status indicator */}
       <div className="fixed top-6 left-6 z-30 px-4 py-2 bg-black/30 backdrop-blur-md border border-white/20 rounded-xl text-white text-sm">
         <div className="flex items-center space-x-3">
           <span className="text-cyan-300 font-mono">
-            {(scrollProgress * 100).toFixed(0)}% Zoom
+            Ultra-Smooth Navigation
           </span>
-          {scrollProgress > 0.3 && (
-            <>
-              <span className="text-white/50">•</span>
-              <span className="text-emerald-300">Ultra-Smooth Scaling</span>
-            </>
-          )}
-          {shouldShowSidebar && (
-            <>
-              <span className="text-white/50">•</span>
-              <span className="text-cyan-300">Ultra-Close Camera</span>
-            </>
-          )}
+          <span className="text-white/50">•</span>
+          <span className="text-emerald-300">Custom Zoom Engine</span>
+          <span className="text-white/50">•</span>
+          <span className="text-purple-300">Buttery Smooth Scroll</span>
         </div>
       </div>
+
+      {/* Sidebar toggle button when closed */}
+      {!sidebarOpen && (
+        <button
+          onClick={openSidebar}
+          className="fixed top-6 right-6 z-30 p-3 bg-white/10 backdrop-blur-md border border-white/20 rounded-xl text-white hover:bg-white/20 transition-all duration-200"
+        >
+          <Move className="w-5 h-5" />
+        </button>
+      )}
 
       {/* Notification */}
       {showNotification && (
@@ -760,28 +608,27 @@ export default function UltraCloseSphereCamera() {
         </div>
       )}
 
-      {/* Hero Section with smaller title positioned at top */}
-      <div className="fixed top-0 left-0 w-full h-screen flex items-start justify-center z-5 pointer-events-none">
-        <div className="relative w-full h-full px-4">
-          <div
-            className="absolute top-16 left-1/2 transform -translate-x-1/2 text-center z-10 transition-opacity duration-1000"
-            style={{ opacity: titleOpacity }}
-          >
+      {/* Main 3D Scene */}
+      <div className="fixed top-0 left-0 w-full h-screen">
+        <div className="relative w-full h-full">
+          {/* Title */}
+          <div className="absolute top-16 left-1/2 transform -translate-x-1/2 text-center z-10 pointer-events-none">
             <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-400 bg-clip-text text-transparent mb-3 leading-tight">
               Tiny Homes
             </h1>
             <p className="text-white/70 text-sm md:text-base max-w-xl mx-auto leading-relaxed">
-              Ultra-Close Camera System
+              Ultra-Smooth Navigation Experience
             </p>
             <p className="text-white/50 text-xs mt-1">
-              Scroll to zoom • 0.8-unit ultra-close positioning
+              Left-click + drag to rotate • Right-click + drag to pan • Scroll
+              for ultra-smooth zoom
             </p>
           </div>
 
           {/* 3D Canvas */}
           <Canvas
             camera={{
-              position: [0, 3, 8],
+              position: [0, 2.5, 50],
               fov: 45,
             }}
             style={{
@@ -791,31 +638,18 @@ export default function UltraCloseSphereCamera() {
             }}
           >
             <Suspense fallback={null}>
-              {/* Ultra-Close Camera Animation with Minimal Distance */}
-              <UltraCloseCameraAnimation
-                cameraTarget={cameraTarget}
-                modelScale={modelScale}
-                onAnimationComplete={handleAnimationComplete}
-                focusedSphere={focusedSphere}
-                spheres={spheres}
-                cameraMode={cameraMode}
-              />
+              {/* Ultra-Smooth Camera Controls (RENAMED component) */}
+              <SmoothCameraControls />
 
               {/* Adaptive Lighting */}
-              <ambientLight intensity={0.6 + (modelScale - 1.0) * 0.1} />
+              <ambientLight intensity={0.6} />
               <directionalLight
                 position={[15, 15, 8]}
-                intensity={1.4 + (modelScale - 1.0) * 0.2}
+                intensity={1.4}
                 castShadow
               />
-              <directionalLight
-                position={[-15, 8, -8]}
-                intensity={1.0 + (modelScale - 1.0) * 0.1}
-              />
-              <pointLight
-                position={[0, 12, 0]}
-                intensity={0.8 + (modelScale - 1.0) * 0.1}
-              />
+              <directionalLight position={[-15, 8, -8]} intensity={1.0} />
+              <pointLight position={[0, 12, 0]} intensity={0.8} />
               <pointLight
                 position={[8, -8, 8]}
                 intensity={0.5}
@@ -829,21 +663,14 @@ export default function UltraCloseSphereCamera() {
 
               <Environment preset="sunset" />
 
-              {/* LOD-Optimized 3D Model (No Rotation) */}
+              {/* 3D Model with Spheres */}
               <group>
                 <LODTinyHouseModel
                   scale={modelScale}
-                  spheres={showSphereControls ? spheres : []}
+                  spheres={spheres}
                   focusedSphere={focusedSphere}
                 />
               </group>
-
-              <OrbitControls
-                enabled={false}
-                enableZoom={false}
-                enablePan={false}
-                enableRotate={false}
-              />
             </Suspense>
           </Canvas>
 
@@ -851,7 +678,7 @@ export default function UltraCloseSphereCamera() {
           {[...Array(6)].map((_, i) => (
             <div
               key={i}
-              className="absolute w-2 h-2 bg-cyan-400/30 rounded-full animate-pulse"
+              className="absolute w-2 h-2 bg-cyan-400/30 rounded-full animate-pulse pointer-events-none"
               style={{
                 left: `${20 + i * 15}%`,
                 top: `${30 + (i % 2) * 40}%`,
@@ -863,7 +690,7 @@ export default function UltraCloseSphereCamera() {
         </div>
       </div>
 
-      {/* Original Sidebar Style with glassmorphism */}
+      {/* Sidebar with glassmorphism */}
       <div
         className={`fixed top-20 right-5 w-80 bg-white/[0.08] backdrop-blur-xl border border-white/15 rounded-3xl z-40 transform transition-all duration-500 ${
           sidebarOpen
@@ -875,7 +702,7 @@ export default function UltraCloseSphereCamera() {
           {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
-              Ultra-Close Navigation
+              Ultra-Smooth Navigation
             </h2>
             <button
               onClick={closeSidebar}
@@ -885,7 +712,34 @@ export default function UltraCloseSphereCamera() {
             </button>
           </div>
 
-          {/* Navigation Menu with Original Style */}
+          {/* Ultra-Smooth Controls Information */}
+          <div className="mb-6 p-3 bg-white/[0.04] rounded-xl border border-white/10">
+            <h3 className="text-sm font-medium text-white/90 mb-2">
+              Ultra-Smooth Engine:
+            </h3>
+            <div className="text-xs text-white/70 space-y-1">
+              <div>
+                • <strong>Rotate:</strong> Left-click + drag (0.8x speed)
+              </div>
+              <div>
+                • <strong>Pan:</strong> Right-click + drag (0.6x speed)
+              </div>
+              <div>
+                • <strong>Zoom:</strong> Custom ultra-smooth scroll
+              </div>
+              <div>
+                • <strong>Damping:</strong> 0.03 factor for silk-smooth motion
+              </div>
+              <div>
+                • <strong>Sensitivity:</strong> 0.002 for precise control
+              </div>
+            </div>
+            <div className="mt-2 text-xs text-emerald-300">
+              🚀 Buttery smooth 60fps navigation experience
+            </div>
+          </div>
+
+          {/* Navigation Menu */}
           <div className="space-y-3 mb-6">
             {Object.entries(menuData).map(([category, items]) => (
               <div key={category} className="space-y-2">
@@ -912,12 +766,8 @@ export default function UltraCloseSphereCamera() {
                         <div
                           key={subItem}
                           onClick={() => {
-                            console.log(
-                              `Clicked dropdown item: ${subItem}, sphere ID: ${sphereId}`
-                            )
                             if (sphereId > 0) {
-                              zoomToSphere(sphereId)
-                              setSelectedSphere(sphereId)
+                              selectSphere(sphereId)
                             }
                           }}
                           className="flex items-center p-2 bg-white/[0.04] hover:bg-white/[0.12] rounded-xl border border-white/[0.08] hover:border-white/20 transition-all duration-200 cursor-pointer group"
@@ -954,157 +804,136 @@ export default function UltraCloseSphereCamera() {
             ))}
           </div>
 
-          {/* Camera Controls */}
-          {showSphereControls && (
-            <div className="border-t border-white/20 pt-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
-                  Ultra-Close Controls
-                </h3>
+          {/* Sphere Controls */}
+          <div className="border-t border-white/20 pt-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
+                Sphere Controls
+              </h3>
+              <div className="flex space-x-2">
                 <button
-                  onClick={resetCamera}
-                  className="px-3 py-1 bg-white/10 hover:bg-white/20 rounded-lg text-xs text-white/80 transition-colors duration-200"
+                  onClick={exportCoordinates}
+                  className="px-2 py-1 bg-emerald-500/20 border border-emerald-400/50 rounded text-xs text-emerald-300 hover:bg-emerald-500/30 transition-all duration-200"
                 >
-                  Reset View
+                  Export
+                </button>
+                <button
+                  onClick={resetAllSpheres}
+                  className="px-2 py-1 bg-red-500/20 border border-red-400/50 rounded text-xs text-red-300 hover:bg-red-500/30 transition-all duration-200"
+                >
+                  Reset All
                 </button>
               </div>
+            </div>
 
-              <div className="text-xs text-white/60 mb-4">
-                Click any appliance above for ultra-close 0.8-unit positioning
-              </div>
+            <div className="text-xs text-white/60 mb-4">
+              Click appliances to select • Use ultra-smooth scroll to navigate
+              to spheres
+            </div>
 
-              {/* Sphere Controls */}
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm font-medium text-white/90">
-                    Sphere Controls
-                  </span>
-                  <div className="flex space-x-2">
+            {/* Sphere List */}
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {spheres.map((sphere) => (
+                <div
+                  key={sphere.id}
+                  className={`p-2 rounded-lg border transition-all duration-200 cursor-pointer ${
+                    selectedSphere === sphere.id
+                      ? 'bg-white/15 border-white/30'
+                      : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
+                  }`}
+                  onClick={() => {
+                    if (selectedSphere === sphere.id) {
+                      setSelectedSphere(null)
+                      setFocusedSphere(null)
+                    } else {
+                      selectSphere(sphere.id)
+                    }
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <div
+                        className="w-3 h-3 rounded-full border border-white/30"
+                        style={{ backgroundColor: sphere.color }}
+                      />
+                      <span className="text-white/90 text-xs font-medium">
+                        {sphere.name}
+                      </span>
+                      {focusedSphere === sphere.id && (
+                        <span className="text-xs text-cyan-300">🎯</span>
+                      )}
+                    </div>
                     <button
-                      onClick={exportCoordinates}
-                      className="px-2 py-1 bg-emerald-500/20 border border-emerald-400/50 rounded text-xs text-emerald-300 hover:bg-emerald-500/30 transition-all duration-200"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        toggleSphereVisibility(sphere.id)
+                      }}
+                      className="p-1 hover:bg-white/10 rounded transition-colors duration-200"
                     >
-                      Export
-                    </button>
-                    <button
-                      onClick={resetAllSpheres}
-                      className="px-2 py-1 bg-red-500/20 border border-red-400/50 rounded text-xs text-red-300 hover:bg-red-500/30 transition-all duration-200"
-                    >
-                      Reset All
+                      {sphere.visible ? (
+                        <Eye className="w-3 h-3 text-white/70" />
+                      ) : (
+                        <EyeOff className="w-3 h-3 text-white/40" />
+                      )}
                     </button>
                   </div>
-                </div>
 
-                {spheres.map((sphere) => (
-                  <div
-                    key={sphere.id}
-                    className={`p-2 rounded-lg border transition-all duration-200 cursor-pointer ${
-                      selectedSphere === sphere.id
-                        ? 'bg-white/15 border-white/30'
-                        : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
-                    }`}
-                    onClick={() => {
-                      if (selectedSphere === sphere.id) {
-                        setSelectedSphere(null)
-                        resetCamera()
-                      } else {
-                        setSelectedSphere(sphere.id)
-                        zoomToSphere(sphere.id)
-                      }
-                    }}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <div
-                          className="w-3 h-3 rounded-full border border-white/30"
-                          style={{ backgroundColor: sphere.color }}
-                        />
-                        <span className="text-white/90 text-xs font-medium">
-                          {sphere.name}
-                        </span>
-                        {focusedSphere === sphere.id && (
-                          <span className="text-xs text-cyan-300">🎯</span>
-                        )}
+                  {selectedSphere === sphere.id && (
+                    <div className="mt-3 space-y-2 border-t border-white/10 pt-2">
+                      <div className="text-xs text-white/60">
+                        Position: ({sphere.x.toFixed(2)}, {sphere.y.toFixed(2)},{' '}
+                        {sphere.z.toFixed(2)})
                       </div>
+                      <div className="text-xs text-cyan-300">
+                        Use ultra-smooth scroll to navigate to this sphere
+                      </div>
+
+                      {/* Position Controls */}
+                      {(['x', 'y', 'z'] as const).map((axis) => (
+                        <div key={axis} className="space-y-1">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs text-white/70 uppercase font-medium">
+                              {axis}
+                            </label>
+                            <span className="text-xs text-white/60 font-mono">
+                              {sphere[axis].toFixed(2)}
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={axis === 'y' ? -2 : -8}
+                            max={axis === 'y' ? 6 : 8}
+                            step="0.1"
+                            value={sphere[axis]}
+                            onChange={(e) =>
+                              updateSpherePosition(
+                                sphere.id,
+                                axis,
+                                parseFloat(e.target.value)
+                              )
+                            }
+                            className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer"
+                          />
+                        </div>
+                      ))}
+
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
-                          toggleSphereVisibility(sphere.id)
+                          resetSpherePosition(sphere.id)
                         }}
-                        className="p-1 hover:bg-white/10 rounded transition-colors duration-200"
+                        className="w-full mt-2 px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-xs text-white/80 transition-colors duration-200 flex items-center justify-center space-x-1"
                       >
-                        {sphere.visible ? (
-                          <Eye className="w-3 h-3 text-white/70" />
-                        ) : (
-                          <EyeOff className="w-3 h-3 text-white/40" />
-                        )}
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Reset</span>
                       </button>
                     </div>
-
-                    {selectedSphere === sphere.id && (
-                      <div className="mt-3 space-y-2 border-t border-white/10 pt-2">
-                        <div className="text-xs text-white/60">
-                          Position: ({sphere.x.toFixed(2)},{' '}
-                          {sphere.y.toFixed(2)}, {sphere.z.toFixed(2)})
-                        </div>
-                        <div className="text-xs text-cyan-300">
-                          Camera: ({sphere.x.toFixed(2)}, {sphere.y.toFixed(2)},{' '}
-                          {(sphere.z + 0.8).toFixed(2)}) • 0.8 units away
-                          (ULTRA-CLOSE!)
-                        </div>
-
-                        {/* Position Controls */}
-                        {(['x', 'y', 'z'] as const).map((axis) => (
-                          <div key={axis} className="space-y-1">
-                            <div className="flex items-center justify-between">
-                              <label className="text-xs text-white/70 uppercase font-medium">
-                                {axis}
-                              </label>
-                              <span className="text-xs text-white/60 font-mono">
-                                {sphere[axis].toFixed(2)}
-                              </span>
-                            </div>
-                            <input
-                              type="range"
-                              min={axis === 'y' ? -2 : -8}
-                              max={axis === 'y' ? 6 : 8}
-                              step="0.1"
-                              value={sphere[axis]}
-                              onChange={(e) =>
-                                updateSpherePosition(
-                                  sphere.id,
-                                  axis,
-                                  parseFloat(e.target.value)
-                                )
-                              }
-                              className="w-full h-1 bg-white/20 rounded-lg appearance-none cursor-pointer"
-                            />
-                          </div>
-                        ))}
-
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            resetSpherePosition(sphere.id)
-                          }}
-                          className="w-full mt-2 px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-xs text-white/80 transition-colors duration-200 flex items-center justify-center space-x-1"
-                        >
-                          <RotateCcw className="w-3 h-3" />
-                          <span>Reset</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+                  )}
+                </div>
+              ))}
             </div>
-          )}
+          </div>
         </div>
-      </div>
-
-      {/* Scroll content */}
-      <div className="relative z-10 pt-[100vh]">
-        <div className="h-[200vh] bg-gradient-to-b from-transparent to-slate-900/50" />
       </div>
     </div>
   )
